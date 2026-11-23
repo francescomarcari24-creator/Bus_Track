@@ -119,7 +119,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Verde = live**: tutto ciò che viene dal tracciamento live è verde (badge, minuti, punti mappa, righe evidenziate); il programmato usa i colori normali.
 - **Aggiorna** (↻) in alto a destra su fermata, linea, mappa, avvisi; rotellina durante il caricamento, i dati vecchi restano visibili.
 - **Gesto indietro predittivo** con anteprima della schermata precedente; **lo scroll e l'inquadratura mappa si conservano** tornando indietro o cambiando scheda (non tra un riavvio e l'altro).
-- **Barra in basso** flottante a pillola, 48 dp, solo testo: Home / Mappa / Avvisi. Le liste finiscono sopra la barra, la mappa le passa sotto.
+- **Barra in basso** flottante, 48 dp, solo testo: Home / Mappa / Avvisi, **sfondo trasparente** (niente colore, ombra o tonalità: resta solo l'indicatore a pillola della scheda attiva). Le liste finiscono sopra la barra, la mappa le passa sotto.
 
 ## 7. Particolarità e problemi noti dei dati di Roma
 
@@ -127,6 +127,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Linea 8 (settimana 23–27/11)**: due servizi attivi insieme (`1#35` regolare e `1#57` con anche "8BUS"), stesse corse sfalsate di 1 minuto. Mostrati entrambi; da verificare di giorno confrontando coi tram live.
 - **Tram 8** risulta con 16 fermate nel percorso più frequente (probabile percorso ridotto per lavori).
 - **Ritardi/anticipi notturni**: molti bus notturni risultano "in anticipo 6–7 min"; è il valore del feed.
+- **Feed mezzi vuoto**: a volte (es. ~03:00) il feed delle posizioni risponde HTTP 200 con 0 byte; l'app mostra "Nessun mezzo in servizio" al posto della mappa.
 - **Avvisi**: testi con entità HTML (`&#039;`) → decodificate in app.
 - 147 linee hanno una sola direzione nei dati (138 con un solo capolinea: circolari/a senso unico).
 - Elenco fermate di una linea = solo il percorso più frequente; le varianti non sono elencate (i loro bus sono contati a parte). Orari dal capolinea = solo corse che partono dal primo stop del percorso tipico.
@@ -143,6 +144,8 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - Verificare di giorno quale dei due orari della linea 8 è reale e, se serve, filtrare l'altro.
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
 - Mostrare il tracciato (`shapes.txt`) di una linea sulla mappa.
+- Con la barra trasparente, sulla mappa le etichette Home/Avvisi poggiano sulle tile: verificare la leggibilità di giorno con i mezzi visibili (se serve, ombra al testo o velo sfumato in basso).
+- Mostrare la mappa anche quando il feed dei mezzi è vuoto.
 - Sostituire `ListItem` deprecato (nuova API Compose) per eliminare i warning.
 
 ---
@@ -171,3 +174,4 @@ Formato: data — cosa è cambiato (file principali).
 17. **Primo commit Git** di tutto il progetto (incluso `markdown.md` e `gtfs.db`, ~22 MB).
 18. **Push su GitHub** (`origin/master`, repository `francescomarcari24-creator/Bus_Track`).
 19. **Branch rinominato `master` → `main`**: `main` impostato come predefinito su GitHub, `origin/master` eliminato.
+20. **Barra in basso con sfondo trasparente** (`FloatingTabBar.kt`: `Surface` trasparente, senza ombra né tonalità).
