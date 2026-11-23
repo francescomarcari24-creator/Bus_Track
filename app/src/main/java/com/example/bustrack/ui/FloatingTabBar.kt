@@ -1,6 +1,7 @@
 package com.example.bustrack.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.CompositionLocalProvider
@@ -93,7 +94,14 @@ fun rememberTabPosition(selected: Int): TabPosition {
  * si muove insieme al dito. Sono composte solo le schede visibili (al massimo due).
  */
 @Composable
-fun TabPager(position: TabPosition, count: Int, content: @Composable (Int) -> Unit) {
+fun TabPager(
+    position: TabPosition,
+    count: Int,
+    current: Int,
+    gesture: BackGestureState,
+    previewTab: Int?,
+    content: @Composable (Int) -> Unit,
+) {
     val first by remember { derivedStateOf { floor(position.value).toInt().coerceIn(0, count - 1) } }
     val last by remember { derivedStateOf { ceil(position.value).toInt().coerceIn(0, count - 1) } }
     // Le schede restano composte una volta create (fuori schermo e "in pausa"): cambiare scheda
@@ -106,20 +114,32 @@ fun TabPager(position: TabPosition, count: Int, content: @Composable (Int) -> Un
     }
     Box(Modifier.fillMaxSize()) {
         for (i in 0 until count) {
-            if (i !in ready && i !in first..last) continue
+            if (i !in ready && i !in first..last && i != previewTab) continue
             key(i) {
                 val active = i in first..last
+                // Durante il back predittivo la scheda precedente si scopre sotto quella attuale:
+                // è la stessa già composta (niente seconda mappa da ricaricare).
+                val isPreview = i == previewTab && gesture.showing
+                val isExiting = i == current && gesture.showing
                 Box(
                     Modifier
                         .fillMaxSize()
+                        .zIndex(if (isExiting) 1f else 0f)
                         .graphicsLayer {
-                            translationX = (i - position.value) * size.width
-                            // Le schede lontane non si disegnano.
-                            alpha = if (active) 1f else 0f
+                            if (isPreview) {
+                                alpha = 1f
+                            } else {
+                                translationX = (i - position.value) * size.width
+                                // Le schede lontane non si disegnano.
+                                alpha = if (active) 1f else 0f
+                                if (isExiting) applyBackExit(gesture)
+                            }
                         }
+                        .background(MaterialTheme.colorScheme.background)
+                        .then(if (isPreview) Modifier.backPreviewScrim(gesture) else Modifier)
                 ) {
-                    // Scheda nascosta: nessun aggiornamento periodico né finestre di dialogo.
-                    CompositionLocalProvider(LocalInBackPreview provides !active) { content(i) }
+                    // Scheda nascosta o in anteprima: nessun aggiornamento periodico né finestre di dialogo.
+                    CompositionLocalProvider(LocalInBackPreview provides (!active || isPreview)) { content(i) }
                 }
             }
         }

@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,6 +38,67 @@ import kotlinx.coroutines.launch
  */
 val LocalInBackPreview = staticCompositionLocalOf { false }
 
+/** Stato del gesto indietro predittivo: avanzamento (0..1), lato da cui parte e se è in corso. */
+class BackGestureState {
+    val progress = Animatable(0f)
+    var edge by mutableIntStateOf(BackEventCompat.EDGE_LEFT)
+    var active by mutableStateOf(false)
+
+    /** true mentre c'è qualcosa da mostrare: gesto in corso o animazione di chiusura. */
+    val showing: Boolean get() = active || progress.value > 0f
+}
+
+/**
+ * Registra il gestore del back predittivo e ne espone lo stato. Chi disegna ([PredictiveBackLayer],
+ * [TabPager]) decide come mostrarlo. Il gestore registrato dopo ha la precedenza su quelli registrati prima.
+ */
+@Composable
+fun rememberBackGesture(enabled: Boolean, onBack: () -> Unit): BackGestureState {
+    val inPreview = LocalInBackPreview.current
+    val state = remember { BackGestureState() }
+    val scope = rememberCoroutineScope()
+    val currentOnBack by rememberUpdatedState(onBack)
+    PredictiveBackHandler(enabled = enabled && !inPreview) { events ->
+        state.active = true
+        try {
+            events.collect { event ->
+                state.edge = event.swipeEdge
+                state.progress.snapTo(event.progress)
+            }
+            // Gesto confermato: porta la schermata fuori e poi cambia pagina.
+            state.progress.animateTo(1f, tween(durationMillis = 200, easing = FastOutSlowInEasing))
+            currentOnBack()
+            state.progress.snapTo(0f)
+        } catch (e: CancellationException) {
+            // Gesto annullato: la schermata rientra (in un'altra coroutine, questa è cancellata).
+            scope.launch { state.progress.animateTo(0f, tween(durationMillis = 200)) }
+            throw e
+        } finally {
+            state.active = false
+        }
+    }
+    return state
+}
+
+/** Trasformazione della pagina che se ne va durante il back: scorre via, si rimpicciolisce, angoli e ombra. */
+fun GraphicsLayerScope.applyBackExit(gesture: BackGestureState) {
+    val p = gesture.progress.value
+    val direction = if (gesture.edge == BackEventCompat.EDGE_RIGHT) -1f else 1f
+    translationX += direction * size.width * p
+    val scale = lerp(1f, 0.9f, (p * 2f).coerceAtMost(1f))
+    scaleX = scale
+    scaleY = scale
+    shadowElevation = if (p > 0f) 16.dp.toPx() else 0f
+    shape = if (p > 0f) RoundedCornerShape(lerp(0f, 28f, (p * 4f).coerceAtMost(1f)).dp) else RectangleShape
+    clip = p > 0f
+}
+
+/** Velo scuro sull'anteprima, che si dissolve man mano che la pagina sopra se ne va. */
+fun Modifier.backPreviewScrim(gesture: BackGestureState): Modifier = drawWithContent {
+    drawContent()
+    drawRect(Color.Black.copy(alpha = 0.25f * (1f - gesture.progress.value)))
+}
+
 /**
  * Gesto indietro predittivo di Android: trascinando dal bordo la schermata attuale scorre
  * verso il lato opposto e si rimpicciolisce, scoprendo sotto l'anteprima di [previous].
@@ -50,66 +113,23 @@ fun PredictiveBackLayer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val inPreview = LocalInBackPreview.current
-    val progress = remember { Animatable(0f) }
-    var swipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
-    var gestureActive by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    PredictiveBackHandler(enabled = enabled && !inPreview) { events ->
-        gestureActive = true
-        try {
-            events.collect { event ->
-                swipeEdge = event.swipeEdge
-                progress.snapTo(event.progress)
-            }
-            // Gesto confermato: porta la schermata fuori e poi cambia pagina.
-            progress.animateTo(1f, tween(durationMillis = 200, easing = FastOutSlowInEasing))
-            onBack()
-            progress.snapTo(0f)
-        } catch (e: CancellationException) {
-            // Gesto annullato: la schermata rientra (in un'altra coroutine, questa è cancellata).
-            scope.launch { progress.animateTo(0f, tween(durationMillis = 200)) }
-            throw e
-        } finally {
-            gestureActive = false
-        }
-    }
-
-    val showPrevious = enabled && (gestureActive || progress.value > 0f)
+    val gesture = rememberBackGesture(enabled, onBack)
     Box(modifier.fillMaxSize()) {
-        if (showPrevious) {
-            val p = progress.value
+        if (enabled && gesture.showing) {
             // L'anteprima resta ferma e a tutto schermo (uno spostamento lascerebbe scoperto un bordo).
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
-                    .drawWithContent {
-                        drawContent()
-                        // Velo scuro che si dissolve man mano che la pagina sopra se ne va.
-                        drawRect(Color.Black.copy(alpha = 0.25f * (1f - p)))
-                    }
+                    .backPreviewScrim(gesture)
             ) {
                 CompositionLocalProvider(LocalInBackPreview provides true) { previous() }
             }
         }
-        val p = progress.value
-        val direction = if (swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f
-        val corner = if (p > 0f) RoundedCornerShape(lerp(0f, 28f, (p * 4f).coerceAtMost(1f)).dp) else RectangleShape
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    translationX = direction * size.width * p
-                    val scale = lerp(1f, 0.9f, (p * 2f).coerceAtMost(1f))
-                    scaleX = scale
-                    scaleY = scale
-                    shadowElevation = if (p > 0f) 16.dp.toPx() else 0f
-                    shape = corner
-                    clip = p > 0f
-                }
-                .then(if (p > 0f) Modifier.clip(corner) else Modifier)
+                .graphicsLayer { applyBackExit(gesture) }
                 .background(MaterialTheme.colorScheme.background)
         ) {
             content()

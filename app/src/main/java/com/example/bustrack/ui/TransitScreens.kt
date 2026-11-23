@@ -35,6 +35,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -111,9 +115,22 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     // Indietro di una scheda (usato dal gesto e dal pulsante "← Mappa" di una fermata aperta dalla mappa).
     val tabBack = remember(vm) {
         {
-            if (history.last() == 0) vm.closeStopIfFromMap()
             history = history.dropLast(1)
         }
+    }
+    // Una fermata aperta dalla mappa si chiude solo a scheda cambiata del tutto, non durante lo scorrimento:
+    // altrimenti, mentre la scheda esce, si vedrebbe già la Home al posto dei dettagli.
+    LaunchedEffect(tab) {
+        if (tab != 0) {
+            snapshotFlow { tabPosition.value }.first { kotlin.math.abs(it - tab) < 0.001f }
+            vm.closeStopIfFromMap()
+        }
+    }
+    // Back predittivo tra le schede: a fine animazione la nuova scheda è già al suo posto (niente secondo scorrimento).
+    val gestureScope = rememberCoroutineScope()
+    val tabGesture = rememberBackGesture(enabled = history.size > 1) {
+        tabBack()
+        gestureScope.launch { tabPosition.anim.snapTo(history.last().toFloat()) }
     }
     val barInset = bottomBarInset()
     CompositionLocalProvider(
@@ -130,15 +147,15 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             contentWindowInsets = WindowInsets.statusBars,
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-                // Indietro tra le schede, con anteprima della scheda precedente.
+                // Indietro tra le schede: la scheda precedente si scopre sotto (vedi TabPager).
                 // I gestori interni (es. pagine dentro Home) sono composti dopo e hanno la precedenza.
-                PredictiveBackLayer(
-                    enabled = history.size > 1,
-                    onBack = tabBack,
-                    previous = { TabContent(history[history.size - 2], vm) },
-                ) {
-                    TabPager(tabPosition, 3) { t -> TabContent(t, vm) }
-                }
+                TabPager(
+                    position = tabPosition,
+                    count = 3,
+                    current = tab,
+                    gesture = tabGesture,
+                    previewTab = history.getOrNull(history.size - 2),
+                ) { t -> TabContent(t, vm) }
                 FloatingTabBar(
                     labels = listOf("Home", "Mappa", "Avvisi"),
                     selected = tab,
