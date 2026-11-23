@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -108,7 +109,7 @@ private fun HourGrid(departures: List<Departure>, mainHeadsign: String?, key: Lo
             modifier = Modifier.padding(top = 8.dp),
         )
     }
-    LazyColumn(state = listState) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
         items(rows, key = { it.departures.first().tripId + it.departures.first().time }) { row ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
                 Text(

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -146,7 +147,7 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             TextButton(onClick = vm::switchDirection) { Text("⇄ Cambia direzione") }
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        LazyColumn(state = listState) {
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
             itemsIndexed(line.stops, key = { i, stop -> "$i-${stop.id}" }) { i, stop ->
                 LineStopRow(
                     stop = stop,

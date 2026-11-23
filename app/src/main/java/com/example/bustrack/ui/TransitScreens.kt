@@ -108,10 +108,11 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
 @Composable
 private fun TabContent(tab: Int, vm: TransitViewModel) {
     when (tab) {
-        // Le liste finiscono sopra la barra flottante; la mappa invece le passa sotto.
-        0 -> Box(Modifier.padding(bottom = LocalBottomBarInset.current)) { StopsScreen(vm) }
+        // Tutte le schede arrivano fino al bordo dello schermo: la barra flottante sta sopra.
+        // Le liste hanno uno spazio finale (LocalBottomBarInset) per portare l'ultima voce sopra la barra.
+        0 -> StopsScreen(vm)
         1 -> VehiclesScreen(vm)
-        else -> Box(Modifier.padding(bottom = LocalBottomBarInset.current)) { AlertsScreen(vm) }
+        else -> AlertsScreen(vm)
     }
 }
 
@@ -153,7 +154,7 @@ private fun StopsScreen(vm: TransitViewModel) {
 private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: FavoritesState, vm: TransitViewModel) {
     val selected = state.selected
     if (page == StopsPage.Stop && selected != null) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { vm.selectStop(null) }) {
@@ -190,7 +191,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     if (result.arrivals.isEmpty()) {
                         Text("Nessun passaggio nelle prossime 2 ore")
                     } else {
-                        LazyColumn {
+                        LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
                             items(result.arrivals, key = { it.tripId + it.time }) { ArrivalRow(it) }
                         }
                     }
@@ -202,7 +203,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
     } else if (page == StopsPage.Line && state.line != null) {
         LineScreen(state.line, vm)
     } else {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
@@ -210,7 +211,10 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            LazyColumn(state = LocalScrollMemory.current.list("home")) {
+            LazyColumn(
+                state = LocalScrollMemory.current.list("home"),
+                contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
+            ) {
                 if (state.query.isBlank()) {
                     favoritesSection(favorites, vm)
                 }
@@ -364,7 +368,7 @@ private fun VehicleRow(v: VehiclePosition) {
 private fun AlertsScreen(vm: TransitViewModel) {
     val state by vm.alerts.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { if (state is Load.Idle) vm.refreshAlerts() }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Avvisi attivi", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
@@ -374,6 +378,7 @@ private fun AlertsScreen(vm: TransitViewModel) {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 state = LocalScrollMemory.current.list("alerts"),
+                contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
             ) {
                 items(alerts, key = { it.id }) { AlertCard(it) }
             }

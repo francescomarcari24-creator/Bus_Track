@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -43,7 +42,7 @@ fun bottomBarInset(): Dp {
     return BarHeight + BarBottomMargin + system + 8.dp
 }
 
-/** Barra di navigazione flottante sopra il contenuto, solo testo, con sfondo trasparente. */
+/** Barra di navigazione a pillola, flottante sopra il contenuto, solo testo. */
 @Composable
 fun FloatingTabBar(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     Surface(
@@ -53,10 +52,9 @@ fun FloatingTabBar(labels: List<String>, selected: Int, onSelect: (Int) -> Unit,
             .fillMaxWidth()
             .height(BarHeight),
         shape = CircleShape,
-        // Sfondo trasparente: niente colore, ombra né sovrapposizione tonale.
-        color = Color.Transparent,
-        shadowElevation = 0.dp,
-        tonalElevation = 0.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        tonalElevation = 3.dp,
     ) {
         Row(Modifier.padding(4.dp).selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
             labels.forEachIndexed { i, label ->

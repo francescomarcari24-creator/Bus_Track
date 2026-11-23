@@ -119,7 +119,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Verde = live**: tutto ciò che viene dal tracciamento live è verde (badge, minuti, punti mappa, righe evidenziate); il programmato usa i colori normali.
 - **Aggiorna** (↻) in alto a destra su fermata, linea, mappa, avvisi; rotellina durante il caricamento, i dati vecchi restano visibili.
 - **Gesto indietro predittivo** con anteprima della schermata precedente; **lo scroll e l'inquadratura mappa si conservano** tornando indietro o cambiando scheda (non tra un riavvio e l'altro).
-- **Barra in basso** flottante, 48 dp, solo testo: Home / Mappa / Avvisi, **sfondo trasparente** (niente colore, ombra o tonalità: resta solo l'indicatore a pillola della scheda attiva). Le liste finiscono sopra la barra, la mappa le passa sotto.
+- **Barra in basso** flottante a pillola, 48 dp, solo testo: Home / Mappa / Avvisi (sfondo `surfaceContainerHigh` con ombra). **Il rettangolo alla base dello schermo è trasparente**: ogni scheda arriva fino al bordo e le liste scorrono *sotto* la pillola; in fondo hanno uno spazio finale (`contentPadding` = `LocalBottomBarInset`) per portare l'ultima voce sopra la barra. Le colonne delle schermate non hanno margine inferiore.
 
 ## 7. Particolarità e problemi noti dei dati di Roma
 
@@ -144,7 +144,6 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - Verificare di giorno quale dei due orari della linea 8 è reale e, se serve, filtrare l'altro.
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
 - Mostrare il tracciato (`shapes.txt`) di una linea sulla mappa.
-- Con la barra trasparente, sulla mappa le etichette Home/Avvisi poggiano sulle tile: verificare la leggibilità di giorno con i mezzi visibili (se serve, ombra al testo o velo sfumato in basso).
 - Mostrare la mappa anche quando il feed dei mezzi è vuoto.
 - Sostituire `ListItem` deprecato (nuova API Compose) per eliminare i warning.
 
@@ -174,4 +173,4 @@ Formato: data — cosa è cambiato (file principali).
 17. **Primo commit Git** di tutto il progetto (incluso `markdown.md` e `gtfs.db`, ~22 MB).
 18. **Push su GitHub** (`origin/master`, repository `francescomarcari24-creator/Bus_Track`).
 19. **Branch rinominato `master` → `main`**: `main` impostato come predefinito su GitHub, `origin/master` eliminato.
-20. **Barra in basso con sfondo trasparente** (`FloatingTabBar.kt`: `Surface` trasparente, senza ombra né tonalità).
+20. **Fascia alla base dello schermo trasparente** (`TransitScreens.kt`, `LineScreen.kt`, `TimetableScreen.kt`): prima le liste venivano tagliate sopra la barra lasciando un rettangolo vuoto; ora arrivano fino al bordo e scorrono sotto la pillola. Provata prima una barra interamente trasparente, poi annullata: ripristinato lo sfondo della pillola (`FloatingTabBar.kt`).
