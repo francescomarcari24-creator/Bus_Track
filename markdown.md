@@ -170,4 +170,4 @@ Formato: data — cosa è cambiato (file principali).
 16. Creato questo file `markdown.md`.
 17. **Primo commit Git** di tutto il progetto (incluso `markdown.md` e `gtfs.db`, ~22 MB).
 18. **Push su GitHub** (`origin/master`, repository `francescomarcari24-creator/Bus_Track`).
-19. **Branch rinominato `master` → `main`**, push di `origin/main`. Da fare a mano su GitHub: impostare `main` come branch predefinito (Settings → General → Default branch), poi eliminare `origin/master`.
+19. **Branch rinominato `master` → `main`**: `main` impostato come predefinito su GitHub, `origin/master` eliminato.
