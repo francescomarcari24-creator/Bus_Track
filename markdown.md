@@ -86,7 +86,7 @@ gtfs/
   GtfsStaticDb.kt            → accesso SQLite: ricerca fermate/linee, percorsi, arrivi
                                programmati, partenze dal capolinea (interfaccia StaticLookup)
   GtfsRealtimeParser.kt      → protobuf → modelli, arricchiti coi nomi dello statico
-  HtmlEntities.kt            → decodifica entità HTML nei testi degli avvisi (&#039; → ')
+  HtmlEntities.kt            → pulizia testi avvisi: entità HTML (&#039; → ') e caratteri C1 Windows-1252 (U+0092 → ’, U+0093/94 → “ ”); usare `clean()`
   TransitRepository.kt       → scarica i feed (HttpURLConnection), unisce live + programmato
 favorites/Favorites.kt       → preferiti su SharedPreferences ("favorites"), ordine di aggiunta
 ui/
@@ -128,15 +128,15 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Tram 8** risulta con 16 fermate nel percorso più frequente (probabile percorso ridotto per lavori).
 - **Ritardi/anticipi notturni**: molti bus notturni risultano "in anticipo 6–7 min"; è il valore del feed.
 - **Feed mezzi vuoto**: a volte (es. ~03:00) il feed delle posizioni risponde HTTP 200 con 0 byte; l'app mostra "Nessun mezzo in servizio" al posto della mappa.
-- **Avvisi**: testi con entità HTML (`&#039;`) → decodificate in app.
+- **Avvisi**: testi con entità HTML (`&#039;`) → decodificate in app. Il feed contiene anche virgolette/apostrofi Windows-1252 salvati come caratteri di controllo C1 (U+0092 ’, U+0093/U+0094 “ ”: ~22 occorrenze, es. "nell’area", avviso 058): il font li disegna come riquadri vuoti → rimappati in `HtmlEntities.clean()`. Un byte `0x9D` simile è rumore binario protobuf, non testo.
 - 147 linee hanno una sola direzione nei dati (138 con un solo capolinea: circolari/a senso unico).
 - Elenco fermate di una linea = solo il percorso più frequente; le varianti non sono elencate (i loro bus sono contati a parte). Orari dal capolinea = solo corse che partono dal primo stop del percorso tipico.
 
 ## 8. Test
 
-- `GtfsRealtimeParserTest` — parsing dei 3 feed su snapshot reali in `app/src/test/resources/gtfs-rt/` (nessuna entità HTML negli avvisi).
+- `GtfsRealtimeParserTest` — parsing dei 3 feed su snapshot reali in `app/src/test/resources/gtfs-rt/` (nessuna entità HTML né carattere C1 negli avvisi; l'avviso 058 ha titolo “Corri al Tiburtino”).
 - `FavoriteTest` — codifica/decodifica dei preferiti.
-- `HtmlEntitiesTest` — decodifica entità.
+- `HtmlEntitiesTest` — decodifica entità e rimappatura dei caratteri C1 (nei sorgenti i C1 si scrivono con `c1(0x92)`, mai come caratteri letterali: sono invisibili).
 - `GtfsStaticDb` usa SQLite Android: verificato sul dispositivo e con query Python sul `.db`, non con test JVM.
 
 ## 9. Idee / da fare
@@ -174,3 +174,4 @@ Formato: data — cosa è cambiato (file principali).
 18. **Push su GitHub** (`origin/master`, repository `francescomarcari24-creator/Bus_Track`).
 19. **Branch rinominato `master` → `main`**: `main` impostato come predefinito su GitHub, `origin/master` eliminato.
 20. **Fascia alla base dello schermo trasparente** (`TransitScreens.kt`, `LineScreen.kt`, `TimetableScreen.kt`): prima le liste venivano tagliate sopra la barra lasciando un rettangolo vuoto; ora arrivano fino al bordo e scorrono sotto la pillola. Provata prima una barra interamente trasparente, poi annullata: ripristinato lo sfondo della pillola (`FloatingTabBar.kt`).
+21. **Riquadri vuoti negli avvisi corretti** (`HtmlEntities.clean()`, `GtfsRealtimeParser`): virgolette e apostrofi Windows-1252 arrivati come caratteri di controllo C1 ora diventano ’ “ ”; test sullo snapshot reale.

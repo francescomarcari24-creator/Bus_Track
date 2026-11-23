@@ -116,7 +116,8 @@ class GtfsRealtimeParser(private val static: StaticLookup) {
         val t = translationList.firstOrNull { it.language.equals("it", ignoreCase = true) }
             ?: translationList.firstOrNull { !it.hasLanguage() }
             ?: translationList.first()
-        // Il feed contiene entità HTML (es. &#039; per l'apostrofo): le converte in caratteri normali.
-        return HtmlEntities.decode(t.text).trim().ifEmpty { null }
+        // Il feed contiene entità HTML (&#039;) e virgolette/apostrofi Windows-1252 salvati come
+        // caratteri di controllo (U+0092…): le converte in caratteri normali.
+        return HtmlEntities.clean(t.text).trim().ifEmpty { null }
     }
 }

@@ -62,5 +62,10 @@ class GtfsRealtimeParserTest {
         val texts = snapshot.items.flatMap { listOfNotNull(it.header, it.description) }
         assertTrue(texts.none { "&#" in it })
         assertTrue(texts.any { "'" in it })
+        // Nessun carattere di controllo C1 (riquadri vuoti nel font): virgolette e apostrofi
+        // Windows-1252 del feed devono essere diventati ’ “ ”.
+        assertTrue(texts.none { text -> text.any { it.code in 0x80..0x9F } })
+        assertTrue(snapshot.items.any { it.header == "“Corri al Tiburtino”" })
+        assertTrue(texts.any { "nell’area" in it })
     }
 }
