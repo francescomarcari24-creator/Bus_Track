@@ -22,7 +22,7 @@ Ultimo aggiornamento: 2026-11-23
 
 - **Le prove si fanno sul telefono collegato** (Samsung Galaxy S23, `SM-S911B`, seriale adb `RFCTC0EWJAD`, 1080×2340, tema scuro, colori dinamici), **non sull'emulatore**.
 - Per pilotare la UI via adb: toccare gli elementi cercando testo / `content-desc` con `uiautomator dump`, non a coordinate fisse. Per scrivere nella ricerca toccare `class="android.widget.EditText"`. **Chiudere la tastiera Samsung prima di scorrere** (`input keyevent 4` se `mInputShown=true`; ESC non la chiude).
-- Git: branch `master`, primo commit il 2026-11-23 (autore "Francesco Marcari", identità Git impostata globalmente). Fare commit e push solo se richiesto.
+- Git: branch `main` (rinominato da `master` il 2026-11-23), primo commit il 2026-11-23 (autore "Francesco Marcari", identità Git impostata globalmente). Fare commit e push solo se richiesto.
 - GitHub: `origin` = https://github.com/francescomarcari24-creator/Bus_Track (push via HTTPS con Git Credential Manager; la GitHub CLI `gh` non è installata).
 
 ## 2. Ambiente
@@ -170,3 +170,4 @@ Formato: data — cosa è cambiato (file principali).
 16. Creato questo file `markdown.md`.
 17. **Primo commit Git** di tutto il progetto (incluso `markdown.md` e `gtfs.db`, ~22 MB).
 18. **Push su GitHub** (`origin/master`, repository `francescomarcari24-creator/Bus_Track`).
+19. **Branch rinominato `master` → `main`**, push di `origin/main`. Da fare a mano su GitHub: impostare `main` come branch predefinito (Settings → General → Default branch), poi eliminare `origin/master`.
