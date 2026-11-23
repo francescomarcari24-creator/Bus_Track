@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.example.bustrack.favorites.Favorite
 import androidx.compose.ui.graphics.Color
+import com.example.bustrack.ui.theme.CardCorner
 import com.example.bustrack.ui.theme.LiveTheme
 import androidx.compose.ui.res.painterResource
 import com.example.bustrack.R
@@ -268,6 +269,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 onValueChange = vm::onQueryChange,
                 label = { Text("Cerca linea, fermata o numero palina") },
                 singleLine = true,
+                shape = CardCorner,
                 modifier = Modifier.fillMaxWidth(),
             )
             LazyColumn(
@@ -405,6 +407,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 onValueChange = { filter = it },
                 label = { Text("Filtra per linea") },
                 singleLine = true,
+                shape = CardCorner,
                 modifier = Modifier.weight(1f),
             )
             if (!showStops) {

@@ -3,7 +3,10 @@ package com.example.bustrack.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -34,6 +37,10 @@ private val LightColorScheme = lightColorScheme(
     */
 )
 
+/** Riquadri tondeggianti come il popup della direzione (28dp): schede, popup e campi di testo. */
+val CardCorner = RoundedCornerShape(28.dp)
+private val AppShapes = Shapes(medium = CardCorner, large = CardCorner, extraLarge = CardCorner)
+
 @Composable
 fun BusTrackTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -55,6 +62,7 @@ fun BusTrackTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
+            shapes = AppShapes,
             content = content
         )
     }
