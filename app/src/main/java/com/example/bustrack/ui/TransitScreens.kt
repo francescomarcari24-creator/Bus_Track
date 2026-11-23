@@ -83,6 +83,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     var history by rememberSaveable { mutableStateOf(listOf(0)) }
     val scrollMemory = remember { ScrollMemory() }
     val tab = history.last()
+    val tabPosition = rememberTabPosition(tab)
     fun openTab(i: Int) {
         if (i != history.last()) history = history.filter { it != i } + i
     }
@@ -135,7 +136,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                     onBack = tabBack,
                     previous = { TabContent(history[history.size - 2], vm) },
                 ) {
-                    TabContent(tab, vm)
+                    TabPager(tabPosition, 3) { t -> TabContent(t, vm) }
                 }
                 FloatingTabBar(
                     labels = listOf("Home", "Mappa", "Avvisi"),
@@ -145,6 +146,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                         if (i == 0) vm.goToStopsHome()
                         openTab(i)
                     },
+                    position = tabPosition,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }

@@ -45,6 +45,7 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
@@ -509,5 +510,8 @@ private fun MapLibreMap.stopFeatureAt(latLng: LatLng): Feature? {
 
 private fun createMapView(context: Context): MapView {
     MapLibre.getInstance(context)
-    return MapView(context).apply { onCreate(null) }
+    // TextureView invece di SurfaceView: segue spostamenti e trasformazioni di Compose senza scatti
+    // (la scheda mappa scorre insieme alla barra).
+    val options = MapLibreMapOptions.createFromAttributes(context).textureMode(true)
+    return MapView(context, options).apply { onCreate(null) }
 }

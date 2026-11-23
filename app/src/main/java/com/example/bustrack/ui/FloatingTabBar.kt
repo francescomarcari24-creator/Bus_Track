@@ -1,6 +1,14 @@
 package com.example.bustrack.ui
 
 import androidx.compose.foundation.background
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.CompositionLocalProvider
+import kotlin.math.floor
+import kotlin.math.ceil
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.key
+import androidx.compose.runtime.derivedStateOf
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.IntOffset
@@ -62,23 +70,85 @@ fun bottomBarInset(): Dp {
 }
 
 /**
+ * Posizione (frazionaria) dell'indicatore della barra: 0 = prima sezione, 1 = seconda, ecc.
+ * È condivisa con il contenuto, che si muove insieme all'indicatore.
+ */
+class TabPosition(initial: Int) {
+    val anim = Animatable(initial.toFloat())
+    var dragging by mutableStateOf(false)
+    val value: Float get() = anim.value
+}
+
+@Composable
+fun rememberTabPosition(selected: Int): TabPosition {
+    val position = remember { TabPosition(selected) }
+    LaunchedEffect(selected) {
+        if (!position.dragging) position.anim.animateTo(selected.toFloat())
+    }
+    return position
+}
+
+/**
+ * Le schede affiancate: segue `position`, quindi durante il trascinamento sulla barra la scheda
+ * si muove insieme al dito. Sono composte solo le schede visibili (al massimo due).
+ */
+@Composable
+fun TabPager(position: TabPosition, count: Int, content: @Composable (Int) -> Unit) {
+    val first by remember { derivedStateOf { floor(position.value).toInt().coerceIn(0, count - 1) } }
+    val last by remember { derivedStateOf { ceil(position.value).toInt().coerceIn(0, count - 1) } }
+    // Le schede restano composte una volta create (fuori schermo e "in pausa"): cambiare scheda
+    // non deve ricomporle da zero né ricreare la mappa, che è ciò che faceva scattare lo scorrimento.
+    val ready = remember { mutableStateListOf<Int>() }
+    LaunchedEffect(Unit) {
+        ready.add(first)
+        delay(600) // a riposo, dopo la prima schermata: prepara anche le altre
+        for (i in 0 until count) if (i !in ready) { ready.add(i); delay(250) }
+    }
+    Box(Modifier.fillMaxSize()) {
+        for (i in 0 until count) {
+            if (i !in ready && i !in first..last) continue
+            key(i) {
+                val active = i in first..last
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = (i - position.value) * size.width
+                            // Le schede lontane non si disegnano.
+                            alpha = if (active) 1f else 0f
+                        }
+                ) {
+                    // Scheda nascosta: nessun aggiornamento periodico né finestre di dialogo.
+                    CompositionLocalProvider(LocalInBackPreview provides !active) { content(i) }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Barra di navigazione a pillola, flottante sopra il contenuto, solo testo.
  * L'indicatore segue il dito mentre si scorre e, al rilascio, si assesta sulla sezione più vicina.
  */
 @Composable
-fun FloatingTabBar(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun FloatingTabBar(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    position: TabPosition,
+    modifier: Modifier = Modifier,
+) {
     val currentOnSelect by rememberUpdatedState(onSelect)
     val scope = rememberCoroutineScope()
-    val indicator = remember { Animatable(selected.toFloat()) }
-    var dragging by remember { mutableStateOf(false) }
+    val indicator = position.anim
+    val dragging = position.dragging
     var rowWidth by remember { mutableIntStateOf(0) }
     val count = labels.size
 
-    LaunchedEffect(selected) {
-        if (!dragging) indicator.animateTo(selected.toFloat())
-    }
     // Sezione evidenziata nel testo: quella sotto l'indicatore mentre si trascina.
-    val highlighted = if (dragging) indicator.value.roundToInt().coerceIn(0, count - 1) else selected
+    val highlighted by remember(count, selected) {
+        derivedStateOf { if (position.dragging) indicator.value.roundToInt().coerceIn(0, count - 1) else selected }
+    }
 
     fun moveTo(x: Float) {
         if (rowWidth <= 0 || count == 0) return
@@ -104,12 +174,12 @@ fun FloatingTabBar(labels: List<String>, selected: Int, onSelect: (Int) -> Unit,
                 .pointerInput(count) {
                     fun settle() {
                         val target = indicator.value.roundToInt().coerceIn(0, count - 1)
-                        dragging = false
+                        position.dragging = false
                         scope.launch { indicator.animateTo(target.toFloat()) }
                         currentOnSelect(target)
                     }
                     detectHorizontalDragGestures(
-                        onDragStart = { dragging = true; moveTo(it.x) },
+                        onDragStart = { position.dragging = true; moveTo(it.x) },
                         onDragEnd = { settle() },
                         onDragCancel = { settle() },
                         onHorizontalDrag = { change, _ ->
