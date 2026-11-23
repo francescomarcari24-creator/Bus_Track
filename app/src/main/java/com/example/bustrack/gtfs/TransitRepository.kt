@@ -69,6 +69,9 @@ class TransitRepository(private val context: Context) {
         static().allStops().also { allStopsCache = it }
     }
 
+    suspend fun routeShapes(label: String): List<RouteShape> =
+        withContext(Dispatchers.IO) { static().routeShapes(label) }
+
     suspend fun stopIdsForLine(label: String): Set<String> =
         withContext(Dispatchers.IO) { static().stopIdsForLine(label) }
 

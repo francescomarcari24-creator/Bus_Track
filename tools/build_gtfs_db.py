@@ -10,7 +10,8 @@ servono ogni fermata, il percorso tipico di ogni linea per direzione, piu' gli o
 stop_times.txt (~240 MB, 5 milioni di righe) viene ridotto a "profili": molte corse
 fanno la stessa sequenza di fermate con gli stessi tempi relativi, quindi ogni corsa
 salva solo profilo + orario di partenza e il profilo salva le fermate con l'offset
-in secondi dalla partenza. shapes.txt non viene copiato.
+in secondi dalla partenza. i tracciati (shapes.txt) vengono ridotti a un solo percorso per linea e direzione,
+semplificato (Douglas-Peucker, ~3 m) e salvato come polilinea codificata (algoritmo Google).
 """
 
 import csv
@@ -36,6 +37,56 @@ def parse_time(hhmmss: str) -> int:
     """GTFS ammette orari oltre le 24:00 (es. 25:10:00 = 01:10 del giorno dopo)."""
     h, m, sec = hhmmss.strip().split(":")
     return int(h) * 3600 + int(m) * 60 + int(sec)
+
+
+SHAPE_TOLERANCE_M = 3.0
+
+
+def simplify(points, tolerance_m):
+    """Douglas-Peucker (iterativo) su coordinate (lat, lon), con la tolleranza in metri."""
+    if len(points) < 3:
+        return list(points)
+    import math
+
+    lat0 = math.radians(sum(p[0] for p in points) / len(points))
+    kx, ky = 111320.0 * math.cos(lat0), 110574.0
+    xy = [(p[1] * kx, p[0] * ky) for p in points]
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        a, b = stack.pop()
+        ax, ay = xy[a]
+        bx, by = xy[b]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy)
+        far, far_d = -1, 0.0
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            d = math.hypot(px - ax, py - ay) if norm == 0 else abs(dx * (ay - py) - (ax - px) * dy) / norm
+            if d > far_d:
+                far, far_d = i, d
+        if far_d > tolerance_m:
+            keep[far] = True
+            stack.append((a, far))
+            stack.append((far, b))
+    return [p for p, k in zip(points, keep) if k]
+
+
+def encode_polyline(points):
+    """Polilinea codificata di Google (precisione 5 decimali, ~1 m)."""
+    out = []
+    prev_lat = prev_lon = 0
+    for lat, lon in points:
+        ilat, ilon = round(lat * 1e5), round(lon * 1e5)
+        for delta in (ilat - prev_lat, ilon - prev_lon):
+            v = ~(delta << 1) if delta < 0 else delta << 1
+            while v >= 0x20:
+                out.append(chr((0x20 | (v & 0x1F)) + 63))
+                v >>= 5
+            out.append(chr(v + 63))
+        prev_lat, prev_lon = ilat, ilon
+    return "".join(out)
 
 
 def main(zip_path: str, out_path: str) -> None:
@@ -87,6 +138,12 @@ def main(zip_path: str, out_path: str) -> None:
             headsign TEXT,
             trip_count INTEGER NOT NULL,
             stop_ids TEXT NOT NULL,
+            PRIMARY KEY (route_id, direction_id)
+        ) WITHOUT ROWID;
+        CREATE TABLE route_shapes (
+            route_id TEXT NOT NULL,
+            direction_id INTEGER NOT NULL,
+            polyline TEXT NOT NULL,
             PRIMARY KEY (route_id, direction_id)
         ) WITHOUT ROWID;
         CREATE TABLE calendar_dates (
@@ -143,6 +200,7 @@ def main(zip_path: str, out_path: str) -> None:
                 none_if_blank(t.get("trip_headsign")),
                 int(direction) if direction is not None else None,
                 t["service_id"],
+                none_if_blank(t.get("shape_id")),
             )
 
         # trip_id -> [(stop_sequence, stop_id, secondi dalla mezzanotte del giorno di servizio)]
@@ -158,9 +216,10 @@ def main(zip_path: str, out_path: str) -> None:
         profiles = {}
         trip_rows = []
         pairs = set()
-        # (route, direzione) -> {sequenza fermate: [numero corse, {capolinea: conteggio}]}
+        # (route, direzione) -> {sequenza fermate: [numero corse, {capolinea: conteggio}, {shape_id: conteggio}]}
         patterns = {}
-        for trip_id, (route_id, headsign, direction, service_id) in trip_info.items():
+        wanted_shapes = {}
+        for trip_id, (route_id, headsign, direction, service_id, shape_id) in trip_info.items():
             times = sorted(stop_times.pop(trip_id, []))
             profile_id = start = None
             if times:
@@ -169,9 +228,11 @@ def main(zip_path: str, out_path: str) -> None:
                 profile_id = profiles.setdefault(key, len(profiles))
                 pairs.update((stop_id, route_id) for _, stop_id, _ in times)
                 stops_seq = tuple(stop_id for _, stop_id, _ in times)
-                entry = patterns.setdefault((route_id, direction or 0), {}).setdefault(stops_seq, [0, {}])
+                entry = patterns.setdefault((route_id, direction or 0), {}).setdefault(stops_seq, [0, {}, {}])
                 entry[0] += 1
                 entry[1][headsign] = entry[1].get(headsign, 0) + 1
+                if shape_id:
+                    entry[2][shape_id] = entry[2].get(shape_id, 0) + 1
             trip_rows.append((trip_id, route_id, headsign, direction, service_id, profile_id, start))
         db.executemany("INSERT INTO trips VALUES (?,?,?,?,?,?,?)", trip_rows)
         db.executemany(
@@ -188,11 +249,35 @@ def main(zip_path: str, out_path: str) -> None:
         # brevi o deviate sono minoritarie) e il suo capolinea piu' comune.
         pattern_rows = []
         for (route_id, direction), seqs in patterns.items():
-            seq, (count, headsigns) = max(seqs.items(), key=lambda kv: kv[1][0])
+            seq, (count, headsigns, shape_counts) = max(seqs.items(), key=lambda kv: kv[1][0])
             headsign = max(headsigns.items(), key=lambda kv: kv[1])[0]
-            total = sum(c for c, _ in seqs.values())
+            total = sum(c[0] for c in seqs.values())
             pattern_rows.append((route_id, direction, headsign, total, ",".join(seq)))
+            # Tracciato: quello usato piu' spesso dalle corse di questo percorso.
+            if shape_counts:
+                wanted_shapes[(route_id, direction)] = max(shape_counts.items(), key=lambda kv: kv[1])[0]
         db.executemany("INSERT INTO route_patterns VALUES (?,?,?,?,?)", pattern_rows)
+
+        # Legge shapes.txt tenendo solo i tracciati scelti (di ~1.200 ne servono ~700).
+        needed = set(wanted_shapes.values())
+        raw_shapes = {}
+        for sp in rows(zf, "shapes.txt"):
+            if sp["shape_id"] in needed:
+                raw_shapes.setdefault(sp["shape_id"], []).append(
+                    (int(sp["shape_pt_sequence"]), float(sp["shape_pt_lat"]), float(sp["shape_pt_lon"]))
+                )
+        shape_rows = []
+        points_before = points_after = 0
+        for (route_id, direction), shape_id in wanted_shapes.items():
+            pts = [(lat, lon) for _, lat, lon in sorted(raw_shapes.get(shape_id, []))]
+            if len(pts) < 2:
+                continue
+            simple = simplify(pts, SHAPE_TOLERANCE_M)
+            points_before += len(pts)
+            points_after += len(simple)
+            shape_rows.append((route_id, direction, encode_polyline(simple)))
+        db.executemany("INSERT INTO route_shapes VALUES (?,?,?)", shape_rows)
+        print(f"Tracciati: {len(shape_rows)} ({points_before} -> {points_after} punti)")
 
         db.executemany(
             "INSERT OR IGNORE INTO calendar_dates VALUES (?,?)",
@@ -207,7 +292,7 @@ def main(zip_path: str, out_path: str) -> None:
     db.executemany(
         "INSERT INTO meta VALUES (?,?)",
         [
-            ("schema_version", "3"),
+            ("schema_version", "4"),
             ("feed_start_date", min(dates) if dates else ""),
             ("feed_end_date", max(dates) if dates else ""),
             ("built_at", datetime.now(timezone.utc).isoformat(timespec="seconds")),

@@ -152,6 +152,10 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     /** Fermate della linea filtrata (null = nessun filtro, tutte). */
     val mapStopIds: StateFlow<Set<String>?> = _mapStopIds
 
+    private val _mapLineShapes = MutableStateFlow<List<com.example.bustrack.gtfs.RouteShape>>(emptyList())
+    /** Tracciati della linea filtrata, uno per direzione (vuoto se nessuna linea corrisponde). */
+    val mapLineShapes: StateFlow<List<com.example.bustrack.gtfs.RouteShape>> = _mapLineShapes
+
     private var mapStopsLoading = false
     private var mapFilterJob: Job? = null
 
@@ -164,12 +168,16 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Filtra le fermate in mappa per numero di linea (vuoto = tutte). */
-    fun setMapStopFilter(line: String) {
+    /**
+     * Filtro per numero di linea sulla mappa (vuoto = nessun filtro): aggiorna le fermate della
+     * linea e il suo tracciato, che si vedono in entrambi i livelli (bus e fermate).
+     */
+    fun setMapLineFilter(line: String) {
         mapFilterJob?.cancel()
-        if (line.isBlank()) { _mapStopIds.value = null; return }
+        if (line.isBlank()) { _mapStopIds.value = null; _mapLineShapes.value = emptyList(); return }
         mapFilterJob = viewModelScope.launch {
             _mapStopIds.value = runCatching { repo.stopIdsForLine(line) }.getOrDefault(emptySet())
+            _mapLineShapes.value = runCatching { repo.routeShapes(line) }.getOrDefault(emptyList())
         }
     }
 

@@ -44,6 +44,14 @@ data class Departure(
     val headsign: String?,
 )
 
+/** Tracciato di una linea in una direzione: coordinate in due array paralleli (lat, lon). */
+class RouteShape(
+    val routeId: String,
+    val directionId: Int,
+    val lat: DoubleArray,
+    val lon: DoubleArray,
+)
+
 /** Stato del mezzo rispetto a [VehiclePosition.currentStopId] (GTFS-RT VehicleStopStatus). */
 enum class VehicleStopStatus { INCOMING_AT, STOPPED_AT, IN_TRANSIT_TO }
 

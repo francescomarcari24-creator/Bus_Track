@@ -59,7 +59,7 @@ Gli ID di corse (`trip_id`, es. `0#575-13`) e fermate (`stop_id`) del live coinc
 
 ## 4. Database statico `app/src/main/assets/gtfs.db`
 
-Generato da `tools/build_gtfs_db.py`. ~22 MB su disco, ~6 MB compressi nell'APK. Schema **versione 3**.
+Generato da `tools/build_gtfs_db.py`. ~22 MB su disco, ~6 MB compressi nell'APK. Schema **versione 4**.
 Al primo avvio (e dopo ogni aggiornamento dell'app) viene copiato in `noBackupFilesDir` e aperto in sola lettura.
 
 | Tabella | Contenuto |
@@ -72,6 +72,7 @@ Al primo avvio (e dopo ogni aggiornamento dell'app) viene copiato in `noBackupFi
 | `calendar_dates` | giorni in cui ogni `service_id` è attivo (solo `exception_type = 1`) |
 | `stop_routes` | quali linee passano da ogni fermata |
 | `route_patterns` | percorso **più frequente** per linea+direzione, con capolinea e lista fermate |
+| `route_shapes` | **tracciato** (da `shapes.txt`) per linea+direzione: quello usato più spesso dalle corse del percorso tipico, semplificato (Douglas-Peucker 3 m: 360k → 126k punti) e salvato come *encoded polyline* di Google (precisione 1 m) |
 
 **Compressione degli orari:** molte corse fanno le stesse fermate con gli stessi tempi relativi → 15.796 profili (523k righe) invece di 5,15 M righe. Orario a una fermata = `trips.start_sec + profile_stops.offset_sec` + mezzanotte del giorno di servizio.
 Gli orari GTFS possono superare 24:00; il riferimento del giorno è "mezzogiorno − 12 h" (corretto anche ai cambi d'ora).
@@ -86,6 +87,7 @@ gtfs/
   GtfsStaticDb.kt            → accesso SQLite: ricerca fermate/linee, percorsi, arrivi
                                programmati, partenze dal capolinea (interfaccia StaticLookup)
   GtfsRealtimeParser.kt      → protobuf → modelli, arricchiti coi nomi dello statico
+  Polyline.kt                → decodifica delle polilinee codificate (tracciati); test con l'esempio ufficiale Google
   HtmlEntities.kt            → pulizia testi avvisi: entità HTML (&#039; → ') e caratteri C1 Windows-1252 (U+0092 → ’, U+0093/94 → “ ”); usare `clean()`
   TransitRepository.kt       → scarica i feed (HttpURLConnection), unisce live + programmato
 favorites/Favorites.kt       → preferiti su SharedPreferences ("favorites"), ordine di aggiunta
@@ -115,7 +117,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Linea**: popup per scegliere la direzione (saltato per linee a direzione unica/circolari) → elenco fermate del percorso tipico con i **bus live evidenziati** ("alla fermata", "in arrivo", "in viaggio verso"); scorre al primo bus; cambia direzione; tocca una fermata per gli arrivi. In alto: ⏰ orari, ☆ preferito, ↻ aggiorna.
 - **Orari dal capolinea**: griglia ora → minuti, Oggi/Domani, prossima partenza evidenziata, `*` = destinazione diversa.
 - **Fermata**: arrivi live + **programmati quando manca il live** (prossime 2 h); se il feed non risponde mostra solo i programmati con avviso. ☆ preferito, ↻ aggiorna.
-- **Mappa** (scheda Mappa): in alto uno **slider Bus / Fermate** (`SegmentedButton`). *Bus*: mappa o lista dei mezzi live, filtro per linea, tocca un mezzo per i dettagli, aggiornamento automatico **60 s su mappa, 30 s su lista** (orologio monotono); la mappa si vede anche a feed vuoto, con il messaggio sopra. *Fermate*: tutte le 8.326 fermate, raggruppate in cerchi col numero (tocca un gruppo per ingrandire), singole con il nome da zoom 15; il filtro per linea mostra solo le fermate di quella linea; tocca una fermata → scheda con palina e linee → **«Apri fermata e arrivi»** porta alla pagina Home della fermata (indietro: Home, poi di nuovo la mappa). Il livello fermate è statico (colore tema, non verde) e sospende il polling dei mezzi.
+- **Mappa** (scheda Mappa): in alto uno **slider Bus / Fermate** (`SegmentedButton`). *Tracciato*: scrivendo un numero di linea nel filtro (o con l'icona mappa 🗺 nella schermata della linea, che apre la scheda Mappa già filtrata) si vede il tracciato della linea, una polilinea per direzione col bordo bianco e in colore tema, sotto a fermate e bus; la mappa si inquadra sul percorso una volta per linea (`ScrollMemory.fittedLineKey`). Vale in entrambi i livelli. *Bus*: mappa o lista dei mezzi live, filtro per linea, tocca un mezzo per i dettagli, aggiornamento automatico **60 s su mappa, 30 s su lista** (orologio monotono); la mappa si vede anche a feed vuoto, con il messaggio sopra. *Fermate*: tutte le 8.326 fermate, raggruppate in cerchi col numero (tocca un gruppo per ingrandire), singole con il nome da zoom 15; il filtro per linea mostra solo le fermate di quella linea; tocca una fermata → scheda con palina e linee → **«Apri fermata e arrivi»** porta alla pagina Home della fermata (indietro: Home, poi di nuovo la mappa). Il livello fermate è statico (colore tema, non verde) e sospende il polling dei mezzi.
 - **Avvisi**: avvisi attivi con linee coinvolte, espandibili.
 - **Verde = live**: tutto ciò che viene dal tracciamento live è verde (badge, minuti, punti mappa, righe evidenziate); il programmato usa i colori normali.
 - **Aggiorna** (↻) in alto a destra su fermata, linea, mappa, avvisi; rotellina durante il caricamento, i dati vecchi restano visibili.
@@ -138,6 +140,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 
 - `GtfsRealtimeParserTest` — parsing dei 3 feed su snapshot reali in `app/src/test/resources/gtfs-rt/` (nessuna entità HTML né carattere C1 negli avvisi; l'avviso 058 ha titolo “Corri al Tiburtino”).
 - `FavoriteTest` — codifica/decodifica dei preferiti.
+- `PolylineTest` — decodifica polilinee (esempio ufficiale Google, uguale a quello usato per verificare l'encoder Python).
 - `HtmlEntitiesTest` — decodifica entità e rimappatura dei caratteri C1 (nei sorgenti i C1 si scrivono con `c1(0x92)`, mai come caratteri letterali: sono invisibili).
 - `GtfsStaticDb` usa SQLite Android: verificato sul dispositivo e con query Python sul `.db`, non con test JVM.
 
@@ -146,7 +149,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - Verificare di giorno quale dei due orari della linea 8 è reale e, se serve, filtrare l'altro.
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
 - Nel livello fermate: evidenziare le fermate di una linea in ordine di percorso e/o fermate vicine alla posizione dell'utente.
-- Mostrare il tracciato (`shapes.txt`) di una linea sulla mappa.
+- Tracciato: evidenziare la direzione scelta (oggi si vedono entrambe le direzioni dello stesso colore) e mostrare le varianti del percorso (oggi solo il tracciato più frequente).
 - Sostituire `ListItem` deprecato (nuova API Compose) per eliminare i warning.
 
 ---
@@ -178,3 +181,4 @@ Formato: data — cosa è cambiato (file principali).
 20. **Fascia alla base dello schermo trasparente** (`TransitScreens.kt`, `LineScreen.kt`, `TimetableScreen.kt`): prima le liste venivano tagliate sopra la barra lasciando un rettangolo vuoto; ora arrivano fino al bordo e scorrono sotto la pillola. Provata prima una barra interamente trasparente, poi annullata: ripristinato lo sfondo della pillola (`FloatingTabBar.kt`).
 21. **Riquadri vuoti negli avvisi corretti** (`HtmlEntities.clean()`, `GtfsRealtimeParser`): virgolette e apostrofi Windows-1252 arrivati come caratteri di controllo C1 ora diventano ’ “ ”; test sullo snapshot reale.
 22. **Mappa con livello Fermate** (`VehicleMap.kt`, `TransitScreens.kt`, `TransitViewModel.kt`, `GtfsStaticDb.allStops/stopIdsForLine`): slider Bus/Fermate, fermate raggruppate, filtro per linea, scheda fermata con apertura degli arrivi (`LocalOpenStop`); la mappa non viene più sostituita dal messaggio a feed vuoto.
+23. **Tracciato della linea sulla mappa** (`tools/build_gtfs_db.py` → schema v4 con `route_shapes`, `gtfs/Polyline.kt`, `GtfsStaticDb.routeShapes`, `VehicleMap.kt` layer `route-*`, icona mappa in `LineScreen.kt`, `setMapLineFilter`): database 22,3 → 22,9 MB. Provato sul telefono con la linea 64 in entrambi i livelli.

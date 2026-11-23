@@ -36,6 +36,9 @@ class ScrollMemory {
     /** Scheda Mezzi: mappa o lista, e filtro per linea. */
     var vehiclesShowMap by mutableStateOf(true)
 
+    /** Linea di cui la mappa ha già adattato l'inquadratura al tracciato (per non rifarlo a ogni ritorno). */
+    var fittedLineKey: String? = null
+
     /** Scheda Mappa: false = si vedono i bus, true = si vedono le fermate. */
     var mapShowStops by mutableStateOf(false)
     var vehiclesFilter by mutableStateOf("")

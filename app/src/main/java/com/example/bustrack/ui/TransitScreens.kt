@@ -66,6 +66,9 @@ import java.time.format.DateTimeFormatter
 private val ROME = ZoneId.of("Europe/Rome")
 internal val HHMM = DateTimeFormatter.ofPattern("HH:mm").withZone(ROME)
 
+/** Mostra una linea (per numero) sulla scheda Mappa, con il suo tracciato (usato dalla schermata della linea). */
+internal val LocalShowLineOnMap = staticCompositionLocalOf<(String) -> Unit> { {} }
+
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
 
@@ -89,11 +92,22 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             openTab(0)
         }
     }
+    // Dalla linea: apre la scheda Mappa (livello bus) filtrata su quella linea, con inquadratura sul tracciato.
+    val showLineOnMap = remember(vm) {
+        { label: String ->
+            scrollMemory.vehiclesFilter = label
+            scrollMemory.vehiclesShowMap = true
+            scrollMemory.mapShowStops = false
+            scrollMemory.fittedLineKey = null
+            openTab(1)
+        }
+    }
     val barInset = bottomBarInset()
     CompositionLocalProvider(
         LocalScrollMemory provides scrollMemory,
         LocalBottomBarInset provides barInset,
         LocalOpenStop provides openStop,
+        LocalShowLineOnMap provides showLineOnMap,
     ) {
         // Solo la barra di stato in alto: in basso il contenuto arriva fino al bordo
         // e la barra flottante gli sta sopra.
@@ -315,7 +329,9 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     val openStop = LocalOpenStop.current
     LaunchedEffect(showStops) { if (showStops) vm.ensureMapStops() }
     // Il filtro per linea vale per il livello attivo: mezzi della linea, oppure fermate della linea.
-    LaunchedEffect(showStops, filter) { if (showStops) vm.setMapStopFilter(filter) }
+    // Con una linea valida si vede anche il suo tracciato, in entrambi i livelli.
+    val lineShapes by vm.mapLineShapes.collectAsStateWithLifecycle()
+    LaunchedEffect(filter) { vm.setMapLineFilter(filter) }
     // Aggiornamento automatico finché la scheda è visibile: ogni 60 s sulla mappa, ogni 30 s
     // sulla lista. Passando da una vista all'altra non si ricarica subito: si aspetta che i dati
     // abbiano raggiunto l'età prevista dal nuovo intervallo.
@@ -397,6 +413,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 showStops = showStops,
                 stops = mapStops,
                 visibleStopIds = stopIds,
+                lineShapes = lineShapes,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 modifier = Modifier.fillMaxSize(),

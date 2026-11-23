@@ -33,6 +33,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.bustrack.gtfs.Route
+import com.example.bustrack.gtfs.RouteShape
 import com.example.bustrack.gtfs.Stop
 import com.example.bustrack.gtfs.VehiclePosition
 import com.example.bustrack.ui.theme.LiveTheme
@@ -42,11 +43,13 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
@@ -54,6 +57,7 @@ import org.maplibre.android.style.sources.GeoJsonOptions
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.time.Instant
 
@@ -66,6 +70,9 @@ private val ROME_CENTER = LatLng(41.9028, 12.4964)
 private const val SOURCE_ID = "vehicles"
 private const val CIRCLE_LAYER = "vehicles-circle"
 private const val LABEL_LAYER = "vehicles-label"
+private const val ROUTE_SOURCE = "route"
+private const val ROUTE_CASING_LAYER = "route-casing"
+private const val ROUTE_LINE_LAYER = "route-line"
 private const val STOPS_SOURCE = "stops"
 private const val STOP_CLUSTER_LAYER = "stops-cluster"
 private const val STOP_COUNT_LAYER = "stops-cluster-count"
@@ -88,6 +95,7 @@ fun VehicleMap(
     showStops: Boolean,
     stops: List<Stop>,
     visibleStopIds: Set<String>?,
+    lineShapes: List<RouteShape>,
     onOpenStop: (Stop) -> Unit,
     loadRoutes: suspend (Stop) -> List<Route>,
     modifier: Modifier = Modifier,
@@ -120,6 +128,8 @@ fun VehicleMap(
             map.uiSettings.setLogoMargins(logoPx, 0, 0, bottomPx)
             map.uiSettings.setAttributionMargins(logoPx * 12, 0, 0, bottomPx)
             map.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
+                // Il tracciato sta sotto a tutto il resto (fermate e mezzi).
+                addRouteLayers(loaded, stopColor)
                 addStopLayers(loaded, stopColor, onStopColor)
                 loaded.addSource(GeoJsonSource(SOURCE_ID))
                 loaded.addLayer(
@@ -198,6 +208,36 @@ fun VehicleMap(
         )
     }
 
+    // Tracciato della linea filtrata (una linea per direzione). Quando arriva una linea nuova
+    // adatta l'inquadratura al percorso; tornando sulla scheda mantiene quella dell'utente.
+    LaunchedEffect(style, lineShapes) {
+        val loaded = style ?: return@LaunchedEffect
+        val source = loaded.getSourceAs<GeoJsonSource>(ROUTE_SOURCE) ?: return@LaunchedEffect
+        source.setGeoJson(
+            FeatureCollection.fromFeatures(
+                lineShapes.map { shape ->
+                    Feature.fromGeometry(
+                        LineString.fromLngLats(shape.lat.indices.map { Point.fromLngLat(shape.lon[it], shape.lat[it]) })
+                    )
+                }
+            )
+        )
+        val key = lineShapes.joinToString("|") { "${it.routeId}:${it.directionId}" }
+        if (key.isNotEmpty() && !inPreview && memory.fittedLineKey != key) {
+            memory.fittedLineKey = key
+            val bounds = LatLngBounds.Builder().apply {
+                lineShapes.forEach { s -> s.lat.indices.forEach { include(LatLng(s.lat[it], s.lon[it])) } }
+            }.build()
+            val pad = (48 * context.resources.displayMetrics.density).toInt()
+            mapView.getMapAsync { map ->
+                // Il fondo tiene conto della barra flottante.
+                map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, pad, pad, pad + barInsetPx.toInt()), 600)
+            }
+        } else if (key.isEmpty()) {
+            memory.fittedLineKey = null
+        }
+    }
+
     // Fermate: costruisce i punti fuori dal thread principale (sono migliaia) e solo se servono.
     LaunchedEffect(style, stops, visibleStopIds, showStops) {
         val source = style?.getSourceAs<GeoJsonSource>(STOPS_SOURCE) ?: return@LaunchedEffect
@@ -254,6 +294,32 @@ fun VehicleMap(
             vehicles.firstOrNull { it.vehicleId == selectedId }?.let { VehicleCard(it, cardModifier) }
         }
     }
+}
+
+/** Tracciato della linea: linea con bordo bianco sotto, colore tema sopra (dato statico, non verde). */
+private fun addRouteLayers(style: Style, color: Int) {
+    style.addSource(GeoJsonSource(ROUTE_SOURCE))
+    val width = Expression.interpolate(
+        Expression.linear(), Expression.zoom(),
+        Expression.stop(10, 3f), Expression.stop(14, 5.5f), Expression.stop(18, 9f),
+    )
+    style.addLayer(
+        LineLayer(ROUTE_CASING_LAYER, ROUTE_SOURCE).withProperties(
+            PropertyFactory.lineColor(android.graphics.Color.WHITE),
+            PropertyFactory.lineWidth(Expression.sum(width, Expression.literal(3f))),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+            PropertyFactory.lineOpacity(0.9f),
+        )
+    )
+    style.addLayer(
+        LineLayer(ROUTE_LINE_LAYER, ROUTE_SOURCE).withProperties(
+            PropertyFactory.lineColor(color),
+            PropertyFactory.lineWidth(width),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
 }
 
 /**

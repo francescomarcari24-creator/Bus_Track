@@ -67,6 +67,24 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
         ).use { c -> buildList { while (c.moveToNext()) add(c.toStop()) } }
     }
 
+    /** Tracciati (uno per direzione) delle linee con questo numero, es. "64". Vuoto se non esistono. */
+    fun routeShapes(label: String): List<RouteShape> {
+        val routeIds = routes.values.filter { it.label.equals(label.trim(), ignoreCase = true) }.map { it.id }
+        if (routeIds.isEmpty()) return emptyList()
+        val placeholders = routeIds.joinToString(",") { "?" }
+        return db.rawQuery(
+            "SELECT route_id, direction_id, polyline FROM route_shapes WHERE route_id IN ($placeholders) ORDER BY route_id, direction_id",
+            routeIds.toTypedArray(),
+        ).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val (lat, lon) = Polyline.decode(c.getString(2))
+                    add(RouteShape(c.getString(0), c.getInt(1), lat, lon))
+                }
+            }
+        }
+    }
+
     /** Tutte le fermate (per il livello "Fermate" della mappa). */
     fun allStops(): List<Stop> =
         db.rawQuery(STOP_SELECT, null).use { c -> buildList(c.count) { while (c.moveToNext()) add(c.toStop()) } }
