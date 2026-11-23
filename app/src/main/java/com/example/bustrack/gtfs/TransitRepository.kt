@@ -62,6 +62,16 @@ class TransitRepository(private val context: Context) {
     suspend fun stopsInOrder(stopIds: List<String>): List<Stop> =
         withContext(Dispatchers.IO) { static().stopsInOrder(stopIds) }
 
+    @Volatile private var allStopsCache: List<Stop>? = null
+
+    /** Tutte le fermate, lette una volta sola. */
+    suspend fun allStops(): List<Stop> = allStopsCache ?: withContext(Dispatchers.IO) {
+        static().allStops().also { allStopsCache = it }
+    }
+
+    suspend fun stopIdsForLine(label: String): Set<String> =
+        withContext(Dispatchers.IO) { static().stopIdsForLine(label) }
+
     suspend fun routesForStop(stopId: String): List<Route> =
         withContext(Dispatchers.IO) { static().routesForStop(stopId) }
 

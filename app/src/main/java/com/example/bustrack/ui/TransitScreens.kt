@@ -28,12 +28,16 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bustrack.gtfs.Arrival
 import com.example.bustrack.gtfs.ServiceAlert
+import com.example.bustrack.gtfs.Stop
 import com.example.bustrack.gtfs.VehiclePosition
 import java.time.Instant
 import java.time.ZoneId
@@ -60,6 +65,9 @@ import java.time.format.DateTimeFormatter
 
 private val ROME = ZoneId.of("Europe/Rome")
 internal val HHMM = DateTimeFormatter.ofPattern("HH:mm").withZone(ROME)
+
+/** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
+internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
 
 @Composable
 fun BusTrackApp(vm: TransitViewModel = viewModel()) {
@@ -70,10 +78,23 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     val scrollMemory = remember { ScrollMemory() }
     val tab = history.last()
     fun openTab(i: Int) {
-        if (i != tab) history = history.filter { it != i } + i
+        if (i != history.last()) history = history.filter { it != i } + i
+    }
+    // Dalla mappa: apre la pagina di una fermata nella scheda Home. Premendo indietro si torna
+    // alla Home e poi alla mappa (la cronologia delle schede la ricorda).
+    val openStop = remember(vm) {
+        { stop: Stop ->
+            vm.goToStopsHome()
+            vm.selectStop(stop)
+            openTab(0)
+        }
     }
     val barInset = bottomBarInset()
-    CompositionLocalProvider(LocalScrollMemory provides scrollMemory, LocalBottomBarInset provides barInset) {
+    CompositionLocalProvider(
+        LocalScrollMemory provides scrollMemory,
+        LocalBottomBarInset provides barInset,
+        LocalOpenStop provides openStop,
+    ) {
         // Solo la barra di stato in alto: in basso il contenuto arriva fino al bordo
         // e la barra flottante gli sta sopra.
         Scaffold(
@@ -287,12 +308,21 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     val memory = LocalScrollMemory.current
     var filter by memory::vehiclesFilter
     var showMap by memory::vehiclesShowMap
+    // Livello della mappa: bus (live) oppure fermate (statiche).
+    var showStops by memory::mapShowStops
+    val mapStops by vm.mapStops.collectAsStateWithLifecycle()
+    val stopIds by vm.mapStopIds.collectAsStateWithLifecycle()
+    val openStop = LocalOpenStop.current
+    LaunchedEffect(showStops) { if (showStops) vm.ensureMapStops() }
+    // Il filtro per linea vale per il livello attivo: mezzi della linea, oppure fermate della linea.
+    LaunchedEffect(showStops, filter) { if (showStops) vm.setMapStopFilter(filter) }
     // Aggiornamento automatico finché la scheda è visibile: ogni 60 s sulla mappa, ogni 30 s
     // sulla lista. Passando da una vista all'altra non si ricarica subito: si aspetta che i dati
     // abbiano raggiunto l'età prevista dal nuovo intervallo.
     val inPreview = LocalInBackPreview.current
-    LaunchedEffect(showMap, inPreview) {
-        if (inPreview) return@LaunchedEffect
+    LaunchedEffect(showMap, showStops, inPreview) {
+        // Il livello fermate è statico: niente download dei mezzi finché è attivo.
+        if (inPreview || showStops) return@LaunchedEffect
         val intervalMs = if (showMap) 60_000L else 30_000L
         while (true) {
             val fetchedAt = (vm.vehicles.value as? Load.Ready)?.fetchedAtElapsed
@@ -305,10 +335,28 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             }
         }
     }
+    val vehicles = (state as? Load.Ready)?.value.orEmpty()
+    val shown = if (filter.isBlank()) vehicles
+    else vehicles.filter { it.routeLabel.equals(filter.trim(), ignoreCase = true) }
+    // Le fermate si vedono sempre sulla mappa; l'elenco esiste solo per i bus.
+    val mapVisible = showStops || showMap
     Column(Modifier.fillMaxSize()) {
+        // Slider a due posizioni: bus (live) / fermate (statiche).
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
+            SegmentedButton(
+                selected = !showStops,
+                onClick = { showStops = false },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            ) { Text("Bus") }
+            SegmentedButton(
+                selected = showStops,
+                onClick = { showStops = true },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            ) { Text("Fermate") }
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
         ) {
             OutlinedTextField(
                 value = filter,
@@ -317,23 +365,50 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = { showMap = !showMap }) { Text(if (showMap) "Lista" else "Mappa") }
-            val refreshing by vm.refreshing.collectAsStateWithLifecycle()
-            RefreshButton(TransitViewModel.REFRESH_VEHICLES in refreshing) { vm.refreshVehicles(manual = true) }
+            if (!showStops) {
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { showMap = !showMap }) { Text(if (showMap) "Lista" else "Mappa") }
+                val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+                RefreshButton(TransitViewModel.REFRESH_VEHICLES in refreshing) { vm.refreshVehicles(manual = true) }
+            }
         }
-        LoadContent(state, empty = "Nessun mezzo in servizio") { vehicles ->
-            val shown = if (filter.isBlank()) vehicles
-            else vehicles.filter { it.routeLabel.equals(filter.trim(), ignoreCase = true) }
+        if (mapVisible) {
+            // Riga di stato sopra la mappa. La mappa è sempre presente (anche a feed vuoto) e resta
+            // la stessa quando si passa da bus a fermate: cambia solo il livello mostrato.
             val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
+            val total = stopIds?.size ?: mapStops.size
+            val status = when {
+                showStops && mapStops.isEmpty() -> "Carico le fermate…"
+                showStops -> "$total fermate" + (if (filter.isBlank()) "" else " della linea ${filter.trim()}") +
+                    " · tocca un gruppo per ingrandire"
+                state is Load.Failed -> "Posizioni dei mezzi non disponibili"
+                state !is Load.Ready -> "Carico i mezzi…"
+                vehicles.isEmpty() -> "Nessun mezzo in servizio" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
+                else -> "${shown.size} mezzi" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
+            }
             Text(
-                "${shown.size} mezzi" + (updatedAt?.let { " · aggiornato alle $it" } ?: ""),
+                status,
                 style = MaterialTheme.typography.labelMedium,
+                color = if (!showStops && state is Load.Failed) MaterialTheme.colorScheme.error else Color.Unspecified,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            if (showMap) {
-                VehicleMap(shown, Modifier.fillMaxSize())
-            } else {
+            VehicleMap(
+                vehicles = if (showStops) emptyList() else shown,
+                showStops = showStops,
+                stops = mapStops,
+                visibleStopIds = stopIds,
+                onOpenStop = openStop,
+                loadRoutes = vm::routesForStop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            LoadContent(state, empty = "Nessun mezzo in servizio") {
+                val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
+                Text(
+                    "${shown.size} mezzi" + (updatedAt?.let { " · aggiornato alle $it" } ?: ""),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
                 LazyColumn(
                     Modifier.padding(horizontal = 16.dp),
                     state = memory.list("vehicles"),

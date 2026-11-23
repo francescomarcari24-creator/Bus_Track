@@ -67,6 +67,21 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
         ).use { c -> buildList { while (c.moveToNext()) add(c.toStop()) } }
     }
 
+    /** Tutte le fermate (per il livello "Fermate" della mappa). */
+    fun allStops(): List<Stop> =
+        db.rawQuery(STOP_SELECT, null).use { c -> buildList(c.count) { while (c.moveToNext()) add(c.toStop()) } }
+
+    /** Id delle fermate servite dalle linee con questo numero (es. "64"); vuoto se la linea non esiste. */
+    fun stopIdsForLine(label: String): Set<String> {
+        val routeIds = routes.values.filter { it.label.equals(label.trim(), ignoreCase = true) }.map { it.id }
+        if (routeIds.isEmpty()) return emptySet()
+        val placeholders = routeIds.joinToString(",") { "?" }
+        return db.rawQuery(
+            "SELECT DISTINCT stop_id FROM stop_routes WHERE route_id IN ($placeholders)",
+            routeIds.toTypedArray(),
+        ).use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
+    }
+
     /** Linee che servono la fermata secondo l'orario programmato. */
     fun routesForStop(stopId: String): List<Route> =
         db.rawQuery("SELECT route_id FROM stop_routes WHERE stop_id = ?", arrayOf(stopId)).use { c ->

@@ -143,6 +143,38 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Livello "Fermate" della mappa ---
+    private val _mapStops = MutableStateFlow<List<Stop>>(emptyList())
+    /** Tutte le fermate, caricate la prima volta che si apre il livello fermate. */
+    val mapStops: StateFlow<List<Stop>> = _mapStops
+
+    private val _mapStopIds = MutableStateFlow<Set<String>?>(null)
+    /** Fermate della linea filtrata (null = nessun filtro, tutte). */
+    val mapStopIds: StateFlow<Set<String>?> = _mapStopIds
+
+    private var mapStopsLoading = false
+    private var mapFilterJob: Job? = null
+
+    fun ensureMapStops() {
+        if (_mapStops.value.isNotEmpty() || mapStopsLoading) return
+        mapStopsLoading = true
+        viewModelScope.launch {
+            _mapStops.value = runCatching { repo.allStops() }.getOrDefault(emptyList())
+            mapStopsLoading = false
+        }
+    }
+
+    /** Filtra le fermate in mappa per numero di linea (vuoto = tutte). */
+    fun setMapStopFilter(line: String) {
+        mapFilterJob?.cancel()
+        if (line.isBlank()) { _mapStopIds.value = null; return }
+        mapFilterJob = viewModelScope.launch {
+            _mapStopIds.value = runCatching { repo.stopIdsForLine(line) }.getOrDefault(emptySet())
+        }
+    }
+
+    suspend fun routesForStop(stop: Stop): List<Route> = repo.routesForStop(stop.id)
+
     private var searchJob: Job? = null
     private var arrivalsJob: Job? = null
     private var lineJob: Job? = null

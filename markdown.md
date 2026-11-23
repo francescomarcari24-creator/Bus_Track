@@ -95,10 +95,11 @@ ui/
                                scheda Mezzi/Mappa, Avvisi, componenti comuni
   LineScreen.kt              → popup direzione + elenco fermate della linea con bus live
   TimetableScreen.kt         → orari di partenza dal capolinea (griglia per ora)
-  VehicleMap.kt              → mappa MapLibre con i mezzi
+  VehicleMap.kt              → mappa MapLibre con due livelli alternativi: bus (live, verde) e fermate
+                               (statiche, cluster nativi MapLibre); schede di mezzo e di fermata
   FloatingTabBar.kt          → barra in basso flottante (Home / Mappa / Avvisi)
   PredictiveBack.kt          → gesto indietro predittivo con anteprima
-  ScrollMemory.kt            → conserva scroll liste, inquadratura mappa, vista/filtro Mezzi
+  ScrollMemory.kt            → conserva scroll liste, inquadratura mappa, vista/filtro/livello (bus o fermate) della mappa
   theme/LiveColors.kt        → verde "live" (chiaro/scuro), fisso anche con colori dinamici
 tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 ```
@@ -114,7 +115,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Linea**: popup per scegliere la direzione (saltato per linee a direzione unica/circolari) → elenco fermate del percorso tipico con i **bus live evidenziati** ("alla fermata", "in arrivo", "in viaggio verso"); scorre al primo bus; cambia direzione; tocca una fermata per gli arrivi. In alto: ⏰ orari, ☆ preferito, ↻ aggiorna.
 - **Orari dal capolinea**: griglia ora → minuti, Oggi/Domani, prossima partenza evidenziata, `*` = destinazione diversa.
 - **Fermata**: arrivi live + **programmati quando manca il live** (prossime 2 h); se il feed non risponde mostra solo i programmati con avviso. ☆ preferito, ↻ aggiorna.
-- **Mappa** (scheda Mezzi): mappa o lista di tutti i mezzi live, filtro per linea, tocca un mezzo per i dettagli. Aggiornamento automatico **60 s su mappa, 30 s su lista** (orologio monotono).
+- **Mappa** (scheda Mappa): in alto uno **slider Bus / Fermate** (`SegmentedButton`). *Bus*: mappa o lista dei mezzi live, filtro per linea, tocca un mezzo per i dettagli, aggiornamento automatico **60 s su mappa, 30 s su lista** (orologio monotono); la mappa si vede anche a feed vuoto, con il messaggio sopra. *Fermate*: tutte le 8.326 fermate, raggruppate in cerchi col numero (tocca un gruppo per ingrandire), singole con il nome da zoom 15; il filtro per linea mostra solo le fermate di quella linea; tocca una fermata → scheda con palina e linee → **«Apri fermata e arrivi»** porta alla pagina Home della fermata (indietro: Home, poi di nuovo la mappa). Il livello fermate è statico (colore tema, non verde) e sospende il polling dei mezzi.
 - **Avvisi**: avvisi attivi con linee coinvolte, espandibili.
 - **Verde = live**: tutto ciò che viene dal tracciamento live è verde (badge, minuti, punti mappa, righe evidenziate); il programmato usa i colori normali.
 - **Aggiorna** (↻) in alto a destra su fermata, linea, mappa, avvisi; rotellina durante il caricamento, i dati vecchi restano visibili.
@@ -127,7 +128,8 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - **Linea 8 (settimana 23–27/11)**: due servizi attivi insieme (`1#35` regolare e `1#57` con anche "8BUS"), stesse corse sfalsate di 1 minuto. Mostrati entrambi; da verificare di giorno confrontando coi tram live.
 - **Tram 8** risulta con 16 fermate nel percorso più frequente (probabile percorso ridotto per lavori).
 - **Ritardi/anticipi notturni**: molti bus notturni risultano "in anticipo 6–7 min"; è il valore del feed.
-- **Feed mezzi vuoto**: a volte (es. ~03:00) il feed delle posizioni risponde HTTP 200 con 0 byte; l'app mostra "Nessun mezzo in servizio" al posto della mappa.
+- **Feed mezzi vuoto**: a volte (es. ~03:00) il feed delle posizioni risponde HTTP 200 con 0 byte; l'app mostra "Nessun mezzo in servizio" sopra la mappa.
+- La mappa di base (OpenFreeMap) disegna già le sue icone di fermata bus a zoom alto: non sono le nostre fermate (quelle sono i cerchi in colore tema).
 - **Avvisi**: testi con entità HTML (`&#039;`) → decodificate in app. Il feed contiene anche virgolette/apostrofi Windows-1252 salvati come caratteri di controllo C1 (U+0092 ’, U+0093/U+0094 “ ”: ~22 occorrenze, es. "nell’area", avviso 058): il font li disegna come riquadri vuoti → rimappati in `HtmlEntities.clean()`. Un byte `0x9D` simile è rumore binario protobuf, non testo.
 - 147 linee hanno una sola direzione nei dati (138 con un solo capolinea: circolari/a senso unico).
 - Elenco fermate di una linea = solo il percorso più frequente; le varianti non sono elencate (i loro bus sono contati a parte). Orari dal capolinea = solo corse che partono dal primo stop del percorso tipico.
@@ -143,8 +145,8 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 
 - Verificare di giorno quale dei due orari della linea 8 è reale e, se serve, filtrare l'altro.
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
+- Nel livello fermate: evidenziare le fermate di una linea in ordine di percorso e/o fermate vicine alla posizione dell'utente.
 - Mostrare il tracciato (`shapes.txt`) di una linea sulla mappa.
-- Mostrare la mappa anche quando il feed dei mezzi è vuoto.
 - Sostituire `ListItem` deprecato (nuova API Compose) per eliminare i warning.
 
 ---
@@ -175,3 +177,4 @@ Formato: data — cosa è cambiato (file principali).
 19. **Branch rinominato `master` → `main`**: `main` impostato come predefinito su GitHub, `origin/master` eliminato.
 20. **Fascia alla base dello schermo trasparente** (`TransitScreens.kt`, `LineScreen.kt`, `TimetableScreen.kt`): prima le liste venivano tagliate sopra la barra lasciando un rettangolo vuoto; ora arrivano fino al bordo e scorrono sotto la pillola. Provata prima una barra interamente trasparente, poi annullata: ripristinato lo sfondo della pillola (`FloatingTabBar.kt`).
 21. **Riquadri vuoti negli avvisi corretti** (`HtmlEntities.clean()`, `GtfsRealtimeParser`): virgolette e apostrofi Windows-1252 arrivati come caratteri di controllo C1 ora diventano ’ “ ”; test sullo snapshot reale.
+22. **Mappa con livello Fermate** (`VehicleMap.kt`, `TransitScreens.kt`, `TransitViewModel.kt`, `GtfsStaticDb.allStops/stopIdsForLine`): slider Bus/Fermate, fermate raggruppate, filtro per linea, scheda fermata con apertura degli arrivi (`LocalOpenStop`); la mappa non viene più sostituita dal messaggio a feed vuoto.
