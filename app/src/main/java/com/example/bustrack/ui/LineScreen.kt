@@ -35,6 +35,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.example.bustrack.ui.theme.CardCorner
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import com.example.bustrack.R
 import com.example.bustrack.favorites.Favorite
@@ -56,7 +58,8 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
         onDismissRequest = onDismiss,
         title = { Text("Linea ${choice.route.label}: scegli la direzione") },
         text = {
-            Column {
+            // Riquadro con gli stessi angoli arrotondati del resto dell'app.
+            Column(Modifier.clip(CardCorner)) {
                 choice.patterns.forEach { pattern ->
                     ListItem(
                         headlineContent = {
@@ -149,7 +152,7 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             modifier = Modifier.padding(top = 8.dp),
         )
         if (line.patterns.size > 1) {
-            TextButton(onClick = vm::switchDirection) { Text("⇄ Cambia direzione") }
+            TextButton(onClick = vm::switchDirection, contentPadding = BackButtonPadding) { Text("⇄ Cambia direzione") }
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {

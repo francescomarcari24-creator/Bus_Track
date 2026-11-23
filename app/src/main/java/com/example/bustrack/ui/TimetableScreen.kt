@@ -144,7 +144,7 @@ private fun MinuteCell(d: Departure, isPast: Boolean, isNext: Boolean, mainHeads
         Text(
             text,
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Normal,
             color = MaterialTheme.colorScheme.onPrimary,
             modifier = Modifier
                 .background(MaterialTheme.colorScheme.primary, MaterialTheme.shapes.small)
@@ -154,6 +154,7 @@ private fun MinuteCell(d: Departure, isPast: Boolean, isNext: Boolean, mainHeads
         Text(
             text,
             style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Normal,
             color = if (isPast) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
         )
     }
