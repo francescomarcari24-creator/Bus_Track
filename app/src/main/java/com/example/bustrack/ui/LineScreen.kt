@@ -101,7 +101,8 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         val refreshing by vm.refreshing.collectAsStateWithLifecycle()
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-            TextButton(onClick = vm::closeLine) { Text("← Ricerca") }
+            val returnStop = vm.stops.collectAsStateWithLifecycle().value.returnStop
+            TextButton(onClick = vm::closeLine) { Text(if (returnStop != null) "← ${returnStop.name}" else "← Ricerca") }
             Spacer(Modifier.weight(1f))
             val showOnMap = LocalShowLineOnMap.current
             IconButton(onClick = { showOnMap(line.route.label, line.pattern.directionId, line.pattern.headsign) }) {

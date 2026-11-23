@@ -188,7 +188,7 @@ private fun StopsScreen(vm: TransitViewModel) {
         state.directionChoice?.let { choice ->
             DirectionDialog(
                 choice = choice,
-                onPick = { vm.openLine(choice.route, choice.patterns, it) },
+                onPick = { vm.openLine(choice.route, choice.allPatterns, it, choice.fromStop) },
                 onDismiss = vm::dismissDirectionChoice,
             )
         }
@@ -252,7 +252,9 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                         Text("Nessun passaggio nelle prossime 2 ore")
                     } else {
                         LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
-                            items(result.arrivals, key = { it.tripId + it.time }) { ArrivalRow(it) }
+                            items(result.arrivals, key = { it.tripId + it.time }) { a ->
+                                ArrivalRow(a, onClick = { vm.onStopRouteClick(a.routeId) })
+                            }
                         }
                     }
                 }
@@ -306,10 +308,11 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
 }
 
 @Composable
-private fun ArrivalRow(a: Arrival) {
+private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
     val now = System.currentTimeMillis() / 1000
     val minutes = ((a.time - now) / 60).coerceAtLeast(0)
     ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { RouteBadge(a.routeLabel, live = a.isRealtime) },
         headlineContent = { Text(a.headsign ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {

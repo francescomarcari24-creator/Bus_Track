@@ -66,7 +66,15 @@ data class FavoritesState(
 )
 
 /** Popup di scelta della direzione, prima di aprire la linea. */
-data class DirectionChoice(val route: Route, val patterns: List<RoutePattern>)
+data class DirectionChoice(
+    val route: Route,
+    /** Direzioni proposte nel popup. */
+    val patterns: List<RoutePattern>,
+    /** Tutte le direzioni della linea (per poter poi passare all'altra); di norma coincidono con [patterns]. */
+    val allPatterns: List<RoutePattern> = patterns,
+    /** Fermata da cui è stata toccata la linea: indietro dalla linea ritorna lì. */
+    val fromStop: Stop? = null,
+)
 
 data class StopsState(
     val query: String = "",
@@ -79,6 +87,9 @@ data class StopsState(
     /** La fermata è stata aperta dalla mappa: indietro torna alla mappa, non alla Home. */
     val openedFromMap: Boolean = false,
     val selected: Stop? = null,
+    /** Fermata da cui è stata aperta la linea in corso: premendo indietro dalla linea si ritorna lì. */
+    val returnStop: Stop? = null,
+    val returnStopFromMap: Boolean = false,
     val routes: List<Route> = emptyList(),
     val arrivals: Load<StopArrivals> = Load.Idle,
 )
@@ -212,10 +223,40 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Tocco su una linea dalla pagina di una fermata: apre la linea con le sue fermate. Se alla fermata
+     * passano mezzi in entrambe le direzioni chiede quale, altrimenti apre direttamente l'unica.
+     */
+    fun onStopRouteClick(routeId: String?) {
+        val stop = _stops.value.selected ?: return
+        if (routeId == null) return
+        viewModelScope.launch {
+            val route = runCatching { repo.route(routeId) }.getOrNull() ?: return@launch
+            val all = runCatching { repo.routePatterns(routeId) }.getOrDefault(emptyList())
+            val here = all.filter { stop.id in it.stopIds }.ifEmpty { all }
+            when (here.size) {
+                0 -> Unit
+                1 -> openLine(route, all, here.single(), fromStop = stop)
+                else -> _stops.update { it.copy(directionChoice = DirectionChoice(route, here, all, stop)) }
+            }
+        }
+    }
+
     fun dismissDirectionChoice() = _stops.update { it.copy(directionChoice = null) }
 
-    fun openLine(route: Route, patterns: List<RoutePattern>, pattern: RoutePattern) {
-        _stops.update { it.copy(directionChoice = null, line = LineState(route, patterns, pattern)) }
+    fun openLine(route: Route, patterns: List<RoutePattern>, pattern: RoutePattern, fromStop: Stop? = null) {
+        if (fromStop != null) arrivalsJob?.cancel()
+        _stops.update {
+            it.copy(
+                directionChoice = null,
+                line = LineState(route, patterns, pattern),
+                // La linea si apre sopra la fermata: la ricordo per tornarci con "indietro".
+                selected = if (fromStop != null) null else it.selected,
+                returnStop = fromStop ?: it.returnStop,
+                returnStopFromMap = if (fromStop != null) it.openedFromMap else it.returnStopFromMap,
+                openedFromMap = if (fromStop != null) false else it.openedFromMap,
+            )
+        }
         startLineLoop(manual = false) {
             val stops = runCatching { repo.stopsInOrder(pattern.stopIds) }.getOrDefault(emptyList())
             _stops.update { s -> s.copy(line = s.line?.copy(stops = stops, vehicles = Load.Loading)) }
@@ -313,7 +354,13 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     fun closeLine() {
         closeTimetable()
         lineJob?.cancel()
-        _stops.update { it.copy(line = null) }
+        val back = _stops.value.returnStop
+        val fromMap = _stops.value.returnStopFromMap
+        _stops.update { it.copy(line = null, returnStop = null, returnStopFromMap = false) }
+        if (back != null) {
+            selectStop(back)
+            if (fromMap) _stops.update { it.copy(openedFromMap = true) }
+        }
     }
 
     fun selectStop(stop: Stop?) {
