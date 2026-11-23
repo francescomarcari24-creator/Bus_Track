@@ -11,12 +11,15 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,6 +82,26 @@ internal val LocalTabBack = staticCompositionLocalOf<() -> Unit> { {} }
 
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
+
+/**
+ * Posizione standard dei pulsanti "indietro": senza margine interno a sinistra, così la freccia
+ * parte dallo stesso punto della prima lettera del titolo sotto (nome della fermata, linea, ...).
+ */
+internal val BackButtonPadding = PaddingValues(start = 0.dp, top = 8.dp, end = 12.dp, bottom = 8.dp)
+
+/** Contenuto di un pulsante "indietro": freccia Material (si specchia con la lingua RTL) e destinazione. */
+@Composable
+internal fun BackLabel(text: String) {
+    Icon(
+        Icons.AutoMirrored.Rounded.ArrowBack,
+        contentDescription = "Indietro",
+        // Il disegno della freccia ha un margine interno: si sposta a sinistra perché la punta
+        // combaci con il bordo della prima lettera del titolo.
+        modifier = Modifier.size(20.dp).offset(x = (-4).dp),
+    )
+    Spacer(Modifier.width(4.dp))
+    Text(text)
+}
 
 @Composable
 fun BusTrackApp(vm: TransitViewModel = viewModel()) {
@@ -228,12 +251,15 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val tabBack = LocalTabBack.current
-                TextButton(onClick = { if (state.openedFromMap) tabBack() else vm.selectStop(null) }) {
-                    Text(
+                TextButton(
+                    onClick = { if (state.openedFromMap) tabBack() else vm.selectStop(null) },
+                    contentPadding = BackButtonPadding,
+                ) {
+                    BackLabel(
                         when {
-                            state.openedFromMap -> "← Mappa"
-                            state.line != null -> "← Linea ${state.line.route.label}"
-                            else -> "← Tutte le fermate"
+                            state.openedFromMap -> "Mappa"
+                            state.line != null -> "Linea ${state.line.route.label}"
+                            else -> "Tutte le fermate"
                         }
                     )
                 }

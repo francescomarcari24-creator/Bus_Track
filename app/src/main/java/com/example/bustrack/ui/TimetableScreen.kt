@@ -37,8 +37,12 @@ private val ROME_ZONE = ZoneId.of("Europe/Rome")
 fun TimetableScreen(state: TimetableState, vm: TransitViewModel) {
     val today = LocalDate.now(ROME_ZONE)
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        TextButton(onClick = vm::closeTimetable, modifier = Modifier.padding(top = 8.dp)) {
-            Text("← Linea ${state.route.label}")
+        TextButton(
+            onClick = vm::closeTimetable,
+            contentPadding = BackButtonPadding,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            BackLabel("Linea ${state.route.label}")
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             RouteBadge(state.route.label)
