@@ -104,7 +104,7 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             TextButton(onClick = vm::closeLine) { Text("← Ricerca") }
             Spacer(Modifier.weight(1f))
             val showOnMap = LocalShowLineOnMap.current
-            IconButton(onClick = { showOnMap(line.route.label) }) {
+            IconButton(onClick = { showOnMap(line.route.label, line.pattern.directionId, line.pattern.headsign) }) {
                 Icon(painterResource(R.drawable.ic_map), contentDescription = "Mostra la linea sulla mappa")
             }
             IconButton(onClick = vm::openTimetable) {

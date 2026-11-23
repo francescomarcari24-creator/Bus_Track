@@ -76,6 +76,8 @@ data class StopsState(
     val line: LineState? = null,
     /** Orari dal capolinea, aperti sopra la schermata della linea. */
     val timetable: TimetableState? = null,
+    /** La fermata è stata aperta dalla mappa: indietro torna alla mappa, non alla Home. */
+    val openedFromMap: Boolean = false,
     val selected: Stop? = null,
     val routes: List<Route> = emptyList(),
     val arrivals: Load<StopArrivals> = Load.Idle,
@@ -316,12 +318,24 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectStop(stop: Stop?) {
         arrivalsJob?.cancel()
-        _stops.update { it.copy(selected = stop, routes = emptyList(), arrivals = Load.Idle) }
+        _stops.update { it.copy(selected = stop, openedFromMap = false, routes = emptyList(), arrivals = Load.Idle) }
         if (stop == null) return
         startArrivalsLoop(stop, manual = false) {
             val routes = runCatching { repo.routesForStop(stop.id) }.getOrDefault(emptyList())
             _stops.update { it.copy(routes = routes, arrivals = Load.Loading) }
         }
+    }
+
+    /** Apre la fermata dalla mappa: con indietro si torna alla mappa (con il suo tracciato). */
+    fun openStopFromMap(stop: Stop) {
+        goToStopsHome()
+        selectStop(stop)
+        _stops.update { it.copy(openedFromMap = true) }
+    }
+
+    /** Lasciando la fermata aperta dalla mappa la chiude, così smette di aggiornare gli arrivi. */
+    fun closeStopIfFromMap() {
+        if (_stops.value.openedFromMap) selectStop(null)
     }
 
     /** Aggiornamento manuale degli arrivi alla fermata aperta (riparte anche il timer dei 30 s). */

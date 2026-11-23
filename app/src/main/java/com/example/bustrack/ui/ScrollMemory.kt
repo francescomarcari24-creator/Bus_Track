@@ -36,6 +36,9 @@ class ScrollMemory {
     /** Scheda Mezzi: mappa o lista, e filtro per linea. */
     var vehiclesShowMap by mutableStateOf(true)
 
+    /** Direzione scelta aprendo la linea sulla mappa: vale finché il filtro resta su quella linea. */
+    var mapLineChoice by mutableStateOf<MapLineChoice?>(null)
+
     /** Linea di cui la mappa ha già adattato l'inquadratura al tracciato (per non rifarlo a ogni ritorno). */
     var fittedLineKey: String? = null
 
@@ -43,5 +46,8 @@ class ScrollMemory {
     var mapShowStops by mutableStateOf(false)
     var vehiclesFilter by mutableStateOf("")
 }
+
+/** Linea e direzione (con capolinea) scelte nella schermata della linea e mostrate sulla mappa. */
+data class MapLineChoice(val label: String, val directionId: Int, val headsign: String?)
 
 val LocalScrollMemory = staticCompositionLocalOf { ScrollMemory() }

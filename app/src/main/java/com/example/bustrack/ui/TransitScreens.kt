@@ -67,7 +67,10 @@ private val ROME = ZoneId.of("Europe/Rome")
 internal val HHMM = DateTimeFormatter.ofPattern("HH:mm").withZone(ROME)
 
 /** Mostra una linea (per numero) sulla scheda Mappa, con il suo tracciato (usato dalla schermata della linea). */
-internal val LocalShowLineOnMap = staticCompositionLocalOf<(String) -> Unit> { {} }
+internal val LocalShowLineOnMap = staticCompositionLocalOf<(label: String, directionId: Int, headsign: String?) -> Unit> { { _, _, _ -> } }
+
+/** Torna alla scheda precedente (come il gesto indietro tra le schede). */
+internal val LocalTabBack = staticCompositionLocalOf<() -> Unit> { {} }
 
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
@@ -87,19 +90,27 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     // alla Home e poi alla mappa (la cronologia delle schede la ricorda).
     val openStop = remember(vm) {
         { stop: Stop ->
-            vm.goToStopsHome()
-            vm.selectStop(stop)
+            // La fermata si apre nella scheda Home ma indietro riporta alla mappa (vedi pageStack).
+            vm.openStopFromMap(stop)
             openTab(0)
         }
     }
     // Dalla linea: apre la scheda Mappa (livello bus) filtrata su quella linea, con inquadratura sul tracciato.
     val showLineOnMap = remember(vm) {
-        { label: String ->
+        { label: String, directionId: Int, headsign: String? ->
+            scrollMemory.mapLineChoice = MapLineChoice(label, directionId, headsign)
             scrollMemory.vehiclesFilter = label
             scrollMemory.vehiclesShowMap = true
             scrollMemory.mapShowStops = false
             scrollMemory.fittedLineKey = null
             openTab(1)
+        }
+    }
+    // Indietro di una scheda (usato dal gesto e dal pulsante "← Mappa" di una fermata aperta dalla mappa).
+    val tabBack = remember(vm) {
+        {
+            if (history.last() == 0) vm.closeStopIfFromMap()
+            history = history.dropLast(1)
         }
     }
     val barInset = bottomBarInset()
@@ -108,6 +119,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         LocalBottomBarInset provides barInset,
         LocalOpenStop provides openStop,
         LocalShowLineOnMap provides showLineOnMap,
+        LocalTabBack provides tabBack,
     ) {
         // Solo la barra di stato in alto: in basso il contenuto arriva fino al bordo
         // e la barra flottante gli sta sopra.
@@ -120,7 +132,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                 // I gestori interni (es. pagine dentro Home) sono composti dopo e hanno la precedenza.
                 PredictiveBackLayer(
                     enabled = history.size > 1,
-                    onBack = { history = history.dropLast(1) },
+                    onBack = tabBack,
                     previous = { TabContent(history[history.size - 2], vm) },
                 ) {
                     TabContent(tab, vm)
@@ -155,7 +167,10 @@ private fun TabContent(tab: Int, vm: TransitViewModel) {
 private enum class StopsPage { Home, Line, Timetable, Stop }
 
 /** Pila delle pagine aperte, ricavata dallo stato: l'ultima è quella visibile. */
-private fun StopsState.pageStack(): List<StopsPage> = buildList {
+private fun StopsState.pageStack(): List<StopsPage> = if (openedFromMap && selected != null) {
+    // Aperta dalla mappa: nessuna pagina "sotto"; indietro è il ritorno alla scheda precedente (la mappa).
+    listOf(StopsPage.Stop)
+} else buildList {
     add(StopsPage.Home)
     if (line != null) add(StopsPage.Line)
     if (timetable != null) add(StopsPage.Timetable)
@@ -192,8 +207,15 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
         Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { vm.selectStop(null) }) {
-                    Text(state.line?.let { "← Linea ${it.route.label}" } ?: "← Tutte le fermate")
+                val tabBack = LocalTabBack.current
+                TextButton(onClick = { if (state.openedFromMap) tabBack() else vm.selectStop(null) }) {
+                    Text(
+                        when {
+                            state.openedFromMap -> "← Mappa"
+                            state.line != null -> "← Linea ${state.line.route.label}"
+                            else -> "← Tutte le fermate"
+                        }
+                    )
                 }
                 Spacer(Modifier.weight(1f))
                 val favorites by vm.favoriteItems.collectAsStateWithLifecycle()
@@ -332,6 +354,8 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     // Con una linea valida si vede anche il suo tracciato, in entrambi i livelli.
     val lineShapes by vm.mapLineShapes.collectAsStateWithLifecycle()
     LaunchedEffect(filter) { vm.setMapLineFilter(filter) }
+    // Direzione scelta dalla schermata della linea: vale finché il filtro resta su quella linea.
+    val lineChoice = memory.mapLineChoice?.takeIf { it.label.equals(filter.trim(), ignoreCase = true) }
     // Aggiornamento automatico finché la scheda è visibile: ogni 60 s sulla mappa, ogni 30 s
     // sulla lista. Passando da una vista all'altra non si ricarica subito: si aspetta che i dati
     // abbiano raggiunto l'età prevista dal nuovo intervallo.
@@ -393,7 +417,8 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             // la stessa quando si passa da bus a fermate: cambia solo il livello mostrato.
             val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
             val total = stopIds?.size ?: mapStops.size
-            val status = when {
+            val direction = lineChoice?.headsign?.let { "Direzione → $it · " }.orEmpty()
+            val status = direction + when {
                 showStops && mapStops.isEmpty() -> "Carico le fermate…"
                 showStops -> "$total fermate" + (if (filter.isBlank()) "" else " della linea ${filter.trim()}") +
                     " · tocca un gruppo per ingrandire"
@@ -414,6 +439,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 stops = mapStops,
                 visibleStopIds = stopIds,
                 lineShapes = lineShapes,
+                highlightDirection = lineChoice?.directionId,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 modifier = Modifier.fillMaxSize(),

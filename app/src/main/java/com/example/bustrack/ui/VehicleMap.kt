@@ -71,7 +71,9 @@ private const val SOURCE_ID = "vehicles"
 private const val CIRCLE_LAYER = "vehicles-circle"
 private const val LABEL_LAYER = "vehicles-label"
 private const val ROUTE_SOURCE = "route"
+private const val ROUTE_OTHER_LAYER = "route-other"
 private const val ROUTE_CASING_LAYER = "route-casing"
+private const val ROUTE_ARROWS_LAYER = "route-arrows"
 private const val ROUTE_LINE_LAYER = "route-line"
 private const val STOPS_SOURCE = "stops"
 private const val STOP_CLUSTER_LAYER = "stops-cluster"
@@ -96,6 +98,7 @@ fun VehicleMap(
     stops: List<Stop>,
     visibleStopIds: Set<String>?,
     lineShapes: List<RouteShape>,
+    highlightDirection: Int?,
     onOpenStop: (Stop) -> Unit,
     loadRoutes: suspend (Stop) -> List<Route>,
     modifier: Modifier = Modifier,
@@ -210,30 +213,38 @@ fun VehicleMap(
 
     // Tracciato della linea filtrata (una linea per direzione). Quando arriva una linea nuova
     // adatta l'inquadratura al percorso; tornando sulla scheda mantiene quella dell'utente.
-    LaunchedEffect(style, lineShapes) {
+    LaunchedEffect(style, lineShapes, highlightDirection) {
         val loaded = style ?: return@LaunchedEffect
         val source = loaded.getSourceAs<GeoJsonSource>(ROUTE_SOURCE) ?: return@LaunchedEffect
+        // Se la direzione scelta non ha un tracciato (es. linea circolare) si evidenziano tutte.
+        val chosen = highlightDirection?.takeIf { d -> lineShapes.any { it.directionId == d } }
         source.setGeoJson(
             FeatureCollection.fromFeatures(
                 lineShapes.map { shape ->
+                    val isChosen = chosen != null && shape.directionId == chosen
                     Feature.fromGeometry(
                         LineString.fromLngLats(shape.lat.indices.map { Point.fromLngLat(shape.lon[it], shape.lat[it]) })
-                    )
+                    ).apply {
+                        addBooleanProperty("hl", chosen == null || isChosen)
+                        addBooleanProperty("arrows", isChosen)
+                    }
                 }
             )
         )
-        val key = lineShapes.joinToString("|") { "${it.routeId}:${it.directionId}" }
-        if (key.isNotEmpty() && !inPreview && memory.fittedLineKey != key) {
+        val key = lineShapes.joinToString("|") { "${it.routeId}:${it.directionId}" } + "#$chosen"
+        if (lineShapes.isNotEmpty() && !inPreview && memory.fittedLineKey != key) {
             memory.fittedLineKey = key
+            // Con una direzione scelta ci si inquadra su quella.
+            val fitShapes = lineShapes.filter { chosen == null || it.directionId == chosen }
             val bounds = LatLngBounds.Builder().apply {
-                lineShapes.forEach { s -> s.lat.indices.forEach { include(LatLng(s.lat[it], s.lon[it])) } }
+                fitShapes.forEach { s -> s.lat.indices.forEach { include(LatLng(s.lat[it], s.lon[it])) } }
             }.build()
             val pad = (48 * context.resources.displayMetrics.density).toInt()
             mapView.getMapAsync { map ->
                 // Il fondo tiene conto della barra flottante.
                 map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, pad, pad, pad + barInsetPx.toInt()), 600)
             }
-        } else if (key.isEmpty()) {
+        } else if (lineShapes.isEmpty()) {
             memory.fittedLineKey = null
         }
     }
@@ -296,16 +307,37 @@ fun VehicleMap(
     }
 }
 
-/** Tracciato della linea: linea con bordo bianco sotto, colore tema sopra (dato statico, non verde). */
+/**
+ * Tracciato della linea. Ogni direzione è una feature con le proprietà `hl` (direzione evidenziata,
+ * o tutte se nessuna è stata scelta) e `arrows` (solo la direzione scelta):
+ * - direzione evidenziata: linea piena con bordo bianco e frecce ">" nel verso di marcia;
+ * - altra direzione: linea sottile e attenuata, senza bordo.
+ * Colore tema (dato statico, non verde).
+ */
 private fun addRouteLayers(style: Style, color: Int) {
     style.addSource(GeoJsonSource(ROUTE_SOURCE))
+    val white = android.graphics.Color.WHITE
+    val highlighted = Expression.eq(Expression.get("hl"), Expression.literal(true))
     val width = Expression.interpolate(
         Expression.linear(), Expression.zoom(),
         Expression.stop(10, 3f), Expression.stop(14, 5.5f), Expression.stop(18, 9f),
     )
+    val thinWidth = Expression.interpolate(
+        Expression.linear(), Expression.zoom(),
+        Expression.stop(10, 2f), Expression.stop(14, 3.5f), Expression.stop(18, 6f),
+    )
     style.addLayer(
-        LineLayer(ROUTE_CASING_LAYER, ROUTE_SOURCE).withProperties(
-            PropertyFactory.lineColor(android.graphics.Color.WHITE),
+        LineLayer(ROUTE_OTHER_LAYER, ROUTE_SOURCE).withFilter(Expression.not(highlighted)).withProperties(
+            PropertyFactory.lineColor(color),
+            PropertyFactory.lineWidth(thinWidth),
+            PropertyFactory.lineOpacity(0.4f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
+    style.addLayer(
+        LineLayer(ROUTE_CASING_LAYER, ROUTE_SOURCE).withFilter(highlighted).withProperties(
+            PropertyFactory.lineColor(white),
             PropertyFactory.lineWidth(Expression.sum(width, Expression.literal(3f))),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -313,12 +345,35 @@ private fun addRouteLayers(style: Style, color: Int) {
         )
     )
     style.addLayer(
-        LineLayer(ROUTE_LINE_LAYER, ROUTE_SOURCE).withProperties(
+        LineLayer(ROUTE_LINE_LAYER, ROUTE_SOURCE).withFilter(highlighted).withProperties(
             PropertyFactory.lineColor(color),
             PropertyFactory.lineWidth(width),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         )
+    )
+    // Frecce lungo la linea: il testo ">" ruotato secondo la geometria, che segue l'ordine delle
+    // fermate, quindi indica il verso di marcia. Solo quando una direzione è stata scelta.
+    style.addLayer(
+        SymbolLayer(ROUTE_ARROWS_LAYER, ROUTE_SOURCE)
+            .withFilter(Expression.eq(Expression.get("arrows"), Expression.literal(true)))
+            .withProperties(
+                PropertyFactory.symbolPlacement(Property.SYMBOL_PLACEMENT_LINE),
+                PropertyFactory.symbolSpacing(48f),
+                PropertyFactory.textField(">"),
+                PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+                PropertyFactory.textSize(20f),
+                PropertyFactory.textColor(white),
+                PropertyFactory.textHaloColor(color),
+                PropertyFactory.textHaloWidth(1.6f),
+                // Permette di seguire anche le curve strette (default 45°) e toglie il margine di collisione.
+                PropertyFactory.textMaxAngle(120f),
+                PropertyFactory.textPadding(0f),
+                PropertyFactory.textKeepUpright(false),
+                PropertyFactory.textRotationAlignment(Property.TEXT_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.textAllowOverlap(true),
+                PropertyFactory.textIgnorePlacement(true),
+            )
     )
 }
 
