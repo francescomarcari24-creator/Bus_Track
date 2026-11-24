@@ -465,9 +465,9 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .clip(HomePanelShape)
+                            .clip(PanelShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), HomePanelShape)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), PanelShape)
                     ) {
                         // Le righe prendono lo sfondo del riquadro (niente riquadro per ogni riga).
                         CompositionLocalProvider(LocalTransparentListItems provides true) {
@@ -511,7 +511,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
             ) {
                 if (state.routeResults.isNotEmpty()) {
-                    item { SectionTitle("Linee") }
+                    item { SectionTitle("Linee", alignToListItems = true) }
                     items(state.routeResults, key = { "route-" + it.id }) { route ->
                         AppListItem(
                             leadingContent = { RouteBadge(route.label) },
@@ -521,7 +521,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                             modifier = Modifier.clickable { vm.onRouteClick(route) },
                         ) { Text("Linea ${route.label}") }
                     }
-                    if (state.results.isNotEmpty()) item { SectionTitle("Fermate") }
+                    if (state.results.isNotEmpty()) item { SectionTitle("Fermate", alignToListItems = true) }
                 }
                 items(state.results, key = { it.id }) { stop ->
                     AppListItem(
@@ -621,6 +621,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
         }
     }
     val linePatterns by vm.mapLinePatterns.collectAsStateWithLifecycle()
+    val barInset = LocalBottomBarInset.current
     val vehicles = (state as? Load.Ready)?.value.orEmpty()
     val shown = if (filter.isBlank()) vehicles
     else vehicles.filter {
@@ -720,6 +721,9 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                     }
                 }
             }
+            // La mappa si ferma sopra la barra flottante (angoli arrotondati anche in basso): dentro,
+            // logo, schede e inquadrature non devono più lasciare spazio alla barra.
+            CompositionLocalProvider(LocalBottomBarInset provides 0.dp) {
             VehicleMap(
                 vehicles = if (showStops) emptyList() else shown,
                 showStops = showStops,
@@ -732,8 +736,10 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },
                 termini = vm.termini.collectAsStateWithLifecycle().value,
                 nearStopIds = nearStopIds,
-                modifier = Modifier.fillMaxSize(),
+                // Stessi margini laterali dei riquadri della Home; in basso si ferma sopra la barra.
+                modifier = Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, bottom = barInset + 8.dp),
             )
+            }
         } else {
             LoadContent(state, empty = "Nessun mezzo in servizio") {
                 val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
@@ -896,13 +902,13 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
                 "Nessun preferito. Apri una linea o una fermata e tocca ☆ in alto per ritrovarla qui.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 24.dp),
+                modifier = Modifier.padding(start = ListItemInset, end = ListItemInset, top = 24.dp),
             )
         }
         return
     }
     if (favorites.lines.isNotEmpty()) {
-        item { SectionTitle("Linee preferite") }
+        item { SectionTitle("Linee preferite", alignToListItems = true) }
         items(favorites.lines, key = { "fav-line-${it.route.id}-${it.pattern.directionId}" }) { fav ->
             AppListItem(
                 leadingContent = { RouteBadge(fav.route.label) },
@@ -912,7 +918,7 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
         }
     }
     if (favorites.stops.isNotEmpty()) {
-        item { SectionTitle("Fermate preferite") }
+        item { SectionTitle("Fermate preferite", alignToListItems = true) }
         items(favorites.stops, key = { "fav-stop-" + it.id }) { stop ->
             AppListItem(
                 supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
@@ -961,8 +967,11 @@ private fun WatchDialog(arrival: Arrival, onPick: (Int) -> Unit, onDismiss: () -
     )
 }
 
-/** Riquadro di "Preferiti" e "Vicine" nella Home: angoli della CardCorner solo in alto. */
-private val HomePanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+/**
+ * Riquadri che arrivano fino in fondo allo schermo (sotto la barra flottante): "Preferiti" e
+ * "Vicine" nella Home e la mappa. Angoli della CardCorner (28 dp) solo in alto.
+ */
+internal val PanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 /** Fermate vicine nella schermata iniziale (mostrate quando la ricerca è vuota). */
 private fun LazyListScope.nearbySection(
@@ -987,7 +996,7 @@ private fun LazyListScope.nearbySection(
             (state.accuracy?.let { " (±$it m)" } ?: "")
     }
     item(key = "nearby-status") {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = ListItemInset, top = 8.dp)) {
             Text(
                 status,
                 style = MaterialTheme.typography.bodyMedium,
@@ -1058,14 +1067,19 @@ internal fun RefreshButton(refreshing: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun SectionTitle(text: String) {
+internal fun SectionTitle(text: String, alignToListItems: Boolean = false) {
     Text(
         text,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+        // Sopra un elenco di righe: allineato al loro contenuto (badge della linea o inizio del nome),
+        // che parte dopo i 16 dp di margine interno delle righe.
+        modifier = Modifier.padding(start = if (alignToListItems) ListItemInset else 0.dp, top = 16.dp, bottom = 4.dp),
     )
 }
+
+/** Margine interno a sinistra delle righe (AppListItem): i titoli sopra le righe si allineano qui. */
+internal val ListItemInset = 16.dp
 
 @Composable
 internal fun RouteBadge(label: String, live: Boolean = false) {

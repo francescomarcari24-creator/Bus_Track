@@ -31,7 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -414,7 +414,8 @@ fun VehicleMap(
         selectedStopId = null
     }
 
-    Box(modifier.clipToBounds()) {
+    // Angoli arrotondati come gli altri riquadri dell'app, anche in basso (la TextureView rispetta il ritaglio).
+    Box(modifier.clip(com.example.bustrack.ui.theme.CardCorner)) {
         AndroidView(factory = { mapView })
         // Riporta la mappa sulla posizione dell'utente (e la segue finché non si sposta la mappa).
         SmallFloatingActionButton(
