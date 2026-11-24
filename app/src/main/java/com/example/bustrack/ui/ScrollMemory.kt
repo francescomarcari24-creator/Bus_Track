@@ -33,6 +33,9 @@ class ScrollMemory {
     /** Ultima inquadratura della mappa dei mezzi. */
     var mapCamera: CameraPosition? = null
 
+    /** Permesso di posizione già chiesto in questa sessione (si chiede una volta sola, aprendo la mappa). */
+    var locationAsked = false
+
     /** Scheda Mezzi: mappa o lista, e filtro per linea. */
     var vehiclesShowMap by mutableStateOf(true)
 

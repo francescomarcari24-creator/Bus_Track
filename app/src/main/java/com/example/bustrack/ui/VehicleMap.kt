@@ -1,15 +1,22 @@
 package com.example.bustrack.ui
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.RectF
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,7 +31,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,6 +54,11 @@ import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.LocationComponentOptions
+import org.maplibre.android.location.OnCameraTrackingChangedListener
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
@@ -118,6 +133,28 @@ fun VehicleMap(
     val barInsetPx = with(androidx.compose.ui.platform.LocalDensity.current) { LocalBottomBarInset.current.toPx() }
     // Il listener dei tocchi si registra una volta sola: legge sempre la modalità corrente.
     val showStopsNow by rememberUpdatedState(showStops)
+    var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
+
+    // Posizione dell'utente: permesso chiesto una volta per sessione aprendo la mappa
+    // (non nell'anteprima del gesto indietro) e di nuovo toccando il tasto "la mia posizione".
+    var hasLocation by remember { mutableStateOf(context.hasLocationPermission()) }
+    var following by remember { mutableStateOf(false) }
+    var centerWhenReady by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result -> hasLocation = result.values.any { it } || context.hasLocationPermission() }
+    val requestLocation = {
+        permissionLauncher.launch(
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        )
+    }
+    // Le schede sono composte tutte insieme: si chiede quando la mappa diventa la scheda visibile.
+    LaunchedEffect(inPreview) {
+        if (!hasLocation && !inPreview && !memory.locationAsked) {
+            memory.locationAsked = true
+            requestLocation()
+        }
+    }
 
     LaunchedEffect(mapView) {
         mapView.getMapAsync { map ->
@@ -159,6 +196,12 @@ fun VehicleMap(
                 )
                 style = loaded
             }
+            mapRef = map
+            // Toccando o trascinando la mappa si smette di seguire la posizione (lo fa MapLibre).
+            map.locationComponent.addOnCameraTrackingChangedListener(object : OnCameraTrackingChangedListener {
+                override fun onCameraTrackingDismissed() { following = false }
+                override fun onCameraTrackingChanged(currentMode: Int) { following = currentMode != CameraMode.NONE }
+            })
             map.addOnMapClickListener { latLng ->
                 if (showStopsNow) {
                     val hit = map.stopFeatureAt(latLng)
@@ -183,6 +226,18 @@ fun VehicleMap(
                 }
                 true
             }
+        }
+    }
+
+    // Pallino della posizione (con cerchio di precisione) appena ci sono stile e permesso.
+    LaunchedEffect(style, mapRef, hasLocation) {
+        val loaded = style ?: return@LaunchedEffect
+        val m = mapRef ?: return@LaunchedEffect
+        if (!hasLocation) return@LaunchedEffect
+        m.enableUserLocation(context, loaded)
+        if (centerWhenReady && !inPreview) {
+            centerWhenReady = false
+            m.followUser()
         }
     }
 
@@ -298,6 +353,22 @@ fun VehicleMap(
 
     Box(modifier.clipToBounds()) {
         AndroidView(factory = { mapView })
+        // Riporta la mappa sulla posizione dell'utente (e la segue finché non si sposta la mappa).
+        SmallFloatingActionButton(
+            onClick = {
+                val m = mapRef
+                when {
+                    !hasLocation -> { centerWhenReady = true; requestLocation() }
+                    m != null && m.locationComponent.isLocationComponentActivated -> m.followUser()
+                    else -> centerWhenReady = true
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (following) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+        ) {
+            Icon(MyLocationIcon, contentDescription = "La mia posizione")
+        }
         // Le schede stanno sopra la barra flottante.
         val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp).padding(bottom = LocalBottomBarInset.current)
         if (showStops) {
@@ -506,6 +577,45 @@ private fun MapLibreMap.stopFeatureAt(latLng: LatLng): Feature? {
     val r = 28f
     return queryRenderedFeatures(RectF(p.x - r, p.y - r, p.x + r, p.y + r), STOP_CLUSTER_LAYER, STOP_POINT_LAYER)
         .firstOrNull()
+}
+
+private fun Context.hasLocationPermission(): Boolean =
+    checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+/** Attiva il LocationComponent di MapLibre (motore di posizione di Android, senza Play Services). */
+@SuppressLint("MissingPermission")
+private fun MapLibreMap.enableUserLocation(context: Context, style: Style) {
+    val lc = locationComponent
+    if (!lc.isLocationComponentActivated) {
+        lc.activateLocationComponent(
+            LocationComponentActivationOptions.builder(context, style)
+                .locationComponentOptions(LocationComponentOptions.builder(context).pulseEnabled(true).build())
+                .useDefaultLocationEngine(true)
+                .build()
+        )
+    }
+    lc.isLocationComponentEnabled = true
+    lc.renderMode = RenderMode.NORMAL
+}
+
+/** Centra sulla posizione dell'utente e la segue; da lontano ingrandisce fino al livello delle strade. */
+private fun MapLibreMap.followUser() {
+    val zoom = cameraPosition.zoom.coerceAtLeast(15.5)
+    locationComponent.setCameraMode(CameraMode.TRACKING, 600L, zoom, null, null, null)
+}
+
+/** Icona Material "my_location" (non inclusa in material-icons-core). */
+private val MyLocationIcon: ImageVector by lazy {
+    ImageVector.Builder("MyLocation", 24.dp, 24.dp, 24f, 24f).addPath(
+        addPathNodes(
+            "M12,8c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4 -1.79,-4 -4,-4zM20.94,11c-0.46,-4.17 -3.77,-7.48 " +
+                "-7.94,-7.94L13,1h-2v2.06C6.83,3.52 3.52,6.83 3.06,11L1,11v2h2.06c0.46,4.17 3.77,7.48 7.94,7.94L11,23h2" +
+                "v-2.06c4.17,-0.46 7.48,-3.77 7.94,-7.94L23,13v-2h-2.06zM12,19c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 " +
+                "7,7 -3.13,7 -7,7z"
+        ),
+        fill = SolidColor(androidx.compose.ui.graphics.Color.Black),
+    ).build()
 }
 
 private fun createMapView(context: Context): MapView {

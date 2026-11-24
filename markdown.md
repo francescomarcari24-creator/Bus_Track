@@ -5,7 +5,7 @@ Dati: **GTFS statico + GTFS-Realtime di Roma Mobilità**.
 
 > **Regola:** ogni modifica al progetto va aggiunta a questo file (sezione *Registro modifiche*, e le altre sezioni se cambiano).
 
-Ultimo aggiornamento: 2026-11-23
+Ultimo aggiornamento: 2026-11-24
 
 ---
 
@@ -34,7 +34,7 @@ Ultimo aggiornamento: 2026-11-23
   - `com.google.transit:gtfs-realtime-bindings:0.0.4` (l'ultima su Maven Central; usa protobuf-java 2.6.1)
   - `org.maplibre.gl:android-sdk:13.7.1` (mappa)
   - `androidx.lifecycle:lifecycle-runtime-compose` e `lifecycle-viewmodel-compose`
-- Permesso: `INTERNET`
+- Permessi: `INTERNET`, `ACCESS_FINE_LOCATION` e `ACCESS_COARSE_LOCATION` (posizione sulla mappa, chiesta a runtime)
 - Python 3 (solo stdlib) per lo script del database.
 
 ## 3. Fonti dati
@@ -183,3 +183,6 @@ Formato: data — cosa è cambiato (file principali).
 22. **Mappa con livello Fermate** (`VehicleMap.kt`, `TransitScreens.kt`, `TransitViewModel.kt`, `GtfsStaticDb.allStops/stopIdsForLine`): slider Bus/Fermate, fermate raggruppate, filtro per linea, scheda fermata con apertura degli arrivi (`LocalOpenStop`); la mappa non viene più sostituita dal messaggio a feed vuoto.
 23. **Tracciato della linea sulla mappa** (`tools/build_gtfs_db.py` → schema v4 con `route_shapes`, `gtfs/Polyline.kt`, `GtfsStaticDb.routeShapes`, `VehicleMap.kt` layer `route-*`, icona mappa in `LineScreen.kt`, `setMapLineFilter`): database 22,3 → 22,9 MB. Provato sul telefono con la linea 64 in entrambi i livelli.
 24. **Direzione evidenziata sul tracciato e ritorno dalla fermata alla mappa** (`VehicleMap.kt` layer `route-other/casing/line/arrows`, `ScrollMemory.MapLineChoice`, `TransitViewModel.openStopFromMap/closeStopIfFromMap`, `TransitScreens.kt` `LocalTabBack`): provato sul telefono con la linea 64 in entrambe le direzioni e con il gesto indietro da una fermata aperta dalla mappa.
+
+### 2026-11-24
+1. **Posizione dell'utente sulla mappa** (`VehicleMap.kt`, `AndroidManifest.xml`, `ScrollMemory.locationAsked`): pallino GPS con cerchio di precisione (LocationComponent di MapLibre, motore di posizione di Android, senza Play Services). Il permesso si chiede una volta per sessione, quando la scheda Mappa diventa visibile (le schede sono composte tutte insieme: l'effetto dipende da `LocalInBackPreview`). Tasto "La mia posizione" in alto a destra (icona Material `my_location` disegnata a mano, non presente in `material-icons-core`): centra sulla posizione (zoom almeno 15,5) e la segue; spostando la mappa smette di seguirla e l'icona torna grigia. Senza permesso, il tasto lo richiede. Provato sul telefono.
