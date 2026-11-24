@@ -399,36 +399,39 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                             .background(MaterialTheme.colorScheme.surfaceContainerLow)
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), HomePanelShape)
                     ) {
-                        // Ogni elenco ha il suo scorrimento.
-                        LazyColumn(
-                            state = memory.list(if (pane == 1) "home-nearby" else "home"),
-                            contentPadding = PaddingValues(
-                                start = 8.dp,
-                                end = 8.dp,
-                                top = 4.dp,
-                                bottom = LocalBottomBarInset.current,
-                            ),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            if (pane == 1) {
-                                nearbySection(
-                                    nearby,
-                                    refreshing = TransitViewModel.REFRESH_NEARBY in refreshing,
-                                    onRefresh = { vm.refreshNearby(manual = true) },
-                                    onAskPermission = askPermission,
-                                    onOpenSettings = { action ->
-                                        context.startActivity(
-                                            Intent(action).apply {
-                                                if (action == Settings.ACTION_APPLICATION_DETAILS_SETTINGS) {
-                                                    data = Uri.fromParts("package", context.packageName, null)
+                        // Le righe prendono lo sfondo del riquadro (niente riquadro per ogni riga).
+                        CompositionLocalProvider(LocalTransparentListItems provides true) {
+                            // Ogni elenco ha il suo scorrimento.
+                            LazyColumn(
+                                state = memory.list(if (pane == 1) "home-nearby" else "home"),
+                                contentPadding = PaddingValues(
+                                    start = 8.dp,
+                                    end = 8.dp,
+                                    top = 4.dp,
+                                    bottom = LocalBottomBarInset.current,
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                if (pane == 1) {
+                                    nearbySection(
+                                        nearby,
+                                        refreshing = TransitViewModel.REFRESH_NEARBY in refreshing,
+                                        onRefresh = { vm.refreshNearby(manual = true) },
+                                        onAskPermission = askPermission,
+                                        onOpenSettings = { action ->
+                                            context.startActivity(
+                                                Intent(action).apply {
+                                                    if (action == Settings.ACTION_APPLICATION_DETAILS_SETTINGS) {
+                                                        data = Uri.fromParts("package", context.packageName, null)
+                                                    }
                                                 }
-                                            }
-                                        )
-                                    },
-                                    onOpenStop = vm::selectStop,
-                                )
-                            } else {
-                                favoritesSection(favorites, vm)
+                                            )
+                                        },
+                                        onOpenStop = vm::selectStop,
+                                    )
+                                } else {
+                                    favoritesSection(favorites, vm)
+                                }
                             }
                         }
                     }
