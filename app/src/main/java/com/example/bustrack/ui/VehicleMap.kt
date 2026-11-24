@@ -586,10 +586,6 @@ private fun MapLibreMap.stopFeatureAt(latLng: LatLng): Feature? {
         .firstOrNull()
 }
 
-private fun Context.hasLocationPermission(): Boolean =
-    checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-        checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
 /** Attiva il LocationComponent di MapLibre (motore di posizione di Android, senza Play Services). */
 @SuppressLint("MissingPermission")
 private fun MapLibreMap.enableUserLocation(context: Context, style: Style) {

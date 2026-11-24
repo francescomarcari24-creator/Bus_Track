@@ -36,6 +36,9 @@ class ScrollMemory {
     /** Permesso di posizione già chiesto in questa sessione (si chiede una volta sola, aprendo la mappa). */
     var locationAsked = false
 
+    /** Schermata iniziale: false = preferiti, true = fermate vicine. */
+    var homeShowNearby by mutableStateOf(false)
+
     /** Scheda Mezzi: mappa o lista, e filtro per linea. */
     var vehiclesShowMap by mutableStateOf(true)
 

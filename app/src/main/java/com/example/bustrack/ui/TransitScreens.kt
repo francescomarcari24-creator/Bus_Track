@@ -5,6 +5,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -27,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -52,6 +62,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.example.bustrack.favorites.Favorite
 import androidx.compose.ui.graphics.Color
 import com.example.bustrack.ui.theme.CardCorner
@@ -322,22 +333,101 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
     } else if (page == StopsPage.Line && state.line != null) {
         LineScreen(state.line, vm)
     } else {
-        Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
+        Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 12.dp, end = 16.dp)) {
+            val memory = LocalScrollMemory.current
+            var showNearby by memory::homeShowNearby
+            val context = LocalContext.current
+            val nearby by vm.nearby.collectAsStateWithLifecycle()
+            val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { vm.refreshNearby(manual = true) }
+            val askPermission = {
+                permissionLauncher.launch(
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                )
+            }
+            // Mostrando le fermate vicine si cerca la posizione (non più di una volta ogni 2 minuti,
+            // vedi refreshNearby); il permesso si chiede solo su azione dell'utente.
+            val inPreview = LocalInBackPreview.current
+            LaunchedEffect(showNearby, inPreview) { if (showNearby && !inPreview) vm.refreshNearby() }
+            // Pillola "Preferiti / Vicine": stesso aspetto e comportamento della barra in basso
+            // (si tocca o si trascina l'indicatore, e l'elenco sotto scorre insieme a lui).
+            val selectHome = { i: Int ->
+                showNearby = i == 1
+                if (i == 1 && !context.hasLocationPermission()) askPermission()
+            }
+            val homePosition = rememberTabPosition(if (showNearby) 1 else 0)
+            PillSwitch(
+                labels = listOf("Preferiti", "Vicine"),
+                selected = if (showNearby) 1 else 0,
+                onSelect = selectHome,
+                position = homePosition,
+                screenPadding = 16.dp,
+            )
             OutlinedTextField(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Cerca linea, fermata o numero palina") },
                 singleLine = true,
                 shape = CardCorner,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
-            LazyColumn(
-                state = LocalScrollMemory.current.list("home"),
+            if (state.query.isBlank()) {
+                SlidingPanes(
+                    homePosition,
+                    count = 2,
+                    gap = 16.dp,
+                    modifier = Modifier.fillMaxSize().padding(top = 12.dp),
+                ) { pane ->
+                    // Riquadro leggero per ciascun elenco: scorrendo si distinguono le due sezioni.
+                    // Arriva fino al bordo in basso (la lista scorre sotto la barra), quindi angoli
+                    // arrotondati solo in alto.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(HomePanelShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), HomePanelShape)
+                    ) {
+                        // Ogni elenco ha il suo scorrimento.
+                        LazyColumn(
+                            state = memory.list(if (pane == 1) "home-nearby" else "home"),
+                            contentPadding = PaddingValues(
+                                start = 8.dp,
+                                end = 8.dp,
+                                top = 4.dp,
+                                bottom = LocalBottomBarInset.current,
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            if (pane == 1) {
+                                nearbySection(
+                                    nearby,
+                                    refreshing = TransitViewModel.REFRESH_NEARBY in refreshing,
+                                    onRefresh = { vm.refreshNearby(manual = true) },
+                                    onAskPermission = askPermission,
+                                    onOpenSettings = { action ->
+                                        context.startActivity(
+                                            Intent(action).apply {
+                                                if (action == Settings.ACTION_APPLICATION_DETAILS_SETTINGS) {
+                                                    data = Uri.fromParts("package", context.packageName, null)
+                                                }
+                                            }
+                                        )
+                                    },
+                                    onOpenStop = vm::selectStop,
+                                )
+                            } else {
+                                favoritesSection(favorites, vm)
+                            }
+                        }
+                    }
+                }
+            } else LazyColumn(
+                state = memory.list("home-search"),
                 contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
             ) {
-                if (state.query.isBlank()) {
-                    favoritesSection(favorites, vm)
-                }
                 if (state.routeResults.isNotEmpty()) {
                     item { SectionTitle("Linee") }
                     items(state.routeResults, key = { "route-" + it.id }) { route ->
@@ -633,6 +723,77 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
                 supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
                 modifier = Modifier.clickable { vm.selectStop(stop) },
             ) { Text(stop.name) }
+        }
+    }
+}
+
+/** Riquadro di "Preferiti" e "Vicine" nella Home: angoli della CardCorner solo in alto. */
+private val HomePanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+/** Fermate vicine nella schermata iniziale (mostrate quando la ricerca è vuota). */
+private fun LazyListScope.nearbySection(
+    state: NearbyState,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    onAskPermission: () -> Unit,
+    /** Apre una pagina delle impostazioni di sistema (azione di [Settings]). */
+    onOpenSettings: (String) -> Unit,
+    onOpenStop: (Stop) -> Unit,
+) {
+    val status = when (state) {
+        NearbyState.Idle, NearbyState.Locating -> "Cerco la tua posizione…"
+        NearbyState.NoPermission -> "Per vedere le fermate vicine serve l'accesso alla posizione."
+        NearbyState.LocationOff -> "La localizzazione del telefono è spenta."
+        NearbyState.NoFix -> "Posizione non disponibile: riprova tra poco."
+        is NearbyState.Ready -> when (state.stops.size) {
+            0 -> "Nessuna fermata entro 1 km"
+            1 -> "1 fermata entro 1 km"
+            else -> "${state.stops.size} fermate entro 1 km"
+        } + " · posizione delle " + HHMM.format(Instant.ofEpochMilli(state.fetchedAt)) +
+            (state.accuracy?.let { " (±$it m)" } ?: "")
+    }
+    item(key = "nearby-status") {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+            Text(
+                status,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (state !is NearbyState.NoPermission && state !is NearbyState.LocationOff) {
+                RefreshButton(refreshing, onRefresh)
+            }
+        }
+    }
+    when (state) {
+        NearbyState.Idle, NearbyState.Locating -> item(key = "nearby-loading") { Loading() }
+        NearbyState.NoPermission -> item(key = "nearby-permission") {
+            Row {
+                Button(onClick = onAskPermission) { Text("Consenti") }
+                Spacer(Modifier.width(8.dp))
+                // Dopo due rifiuti Android non mostra più la richiesta: resta solo l'impostazione dell'app.
+                TextButton(onClick = { onOpenSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS) }) {
+                    Text("Impostazioni app")
+                }
+            }
+        }
+        NearbyState.LocationOff -> item(key = "nearby-off") {
+            Button(onClick = { onOpenSettings(Settings.ACTION_LOCATION_SOURCE_SETTINGS) }) { Text("Attiva la localizzazione") }
+        }
+        NearbyState.NoFix -> Unit
+        is NearbyState.Ready -> items(state.stops, key = { "nearby-" + it.stop.id }) { near ->
+            AppListItem(
+                supportingContent = {
+                    Text(
+                        "Palina ${near.stop.code ?: near.stop.id}" +
+                            near.routes.takeIf { it.isNotEmpty() }?.let { r -> " · Linee: " + r.joinToString(" · ") { it.label } }.orEmpty(),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                trailingContent = { Text("${near.meters} m", style = MaterialTheme.typography.labelLarge) },
+                modifier = Modifier.clickable { onOpenStop(near.stop) },
+            ) { Text(near.stop.name) }
         }
     }
 }

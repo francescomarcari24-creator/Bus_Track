@@ -158,10 +158,63 @@ fun FloatingTabBar(
     position: TabPosition,
     modifier: Modifier = Modifier,
 ) {
+    Surface(
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(start = BarSideMargin, end = BarSideMargin, bottom = BarBottomMargin)
+            .fillMaxWidth()
+            .height(BarHeight),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        tonalElevation = 3.dp,
+    ) {
+        PillTabs(labels, selected, onSelect, position)
+    }
+}
+
+/**
+ * Selettore a pillola con aspetto e comportamento identici alla barra in basso: stessa altezza,
+ * colori, ombra, indicatore e larghezza (stessi margini dai bordi dello schermo; [screenPadding]
+ * è il margine che il contenitore ha già). Usato in alto nella Home per "Preferiti / Vicine".
+ */
+@Composable
+fun PillSwitch(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    position: TabPosition,
+    modifier: Modifier = Modifier,
+    screenPadding: Dp = 0.dp,
+) {
+    Surface(
+        modifier = modifier
+            .padding(horizontal = (BarSideMargin - screenPadding).coerceAtLeast(0.dp))
+            .fillMaxWidth()
+            .height(BarHeight),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        tonalElevation = 3.dp,
+    ) {
+        PillTabs(labels, selected, onSelect, position)
+    }
+}
+
+/**
+ * Contenuto della pillola: indicatore e sezioni. Si tocca una sezione oppure si trascina
+ * l'indicatore, che segue il dito e al rilascio si assesta sulla sezione più vicina.
+ */
+@Composable
+private fun PillTabs(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    position: TabPosition,
+) {
     val currentOnSelect by rememberUpdatedState(onSelect)
     val scope = rememberCoroutineScope()
     val indicator = position.anim
-    val dragging = position.dragging
     var rowWidth by remember { mutableIntStateOf(0) }
     val count = labels.size
 
@@ -176,73 +229,92 @@ fun FloatingTabBar(
         scope.launch { indicator.snapTo(target) }
     }
 
-    Surface(
-        modifier = modifier
-            .navigationBarsPadding()
-            .padding(start = BarSideMargin, end = BarSideMargin, bottom = BarBottomMargin)
-            .fillMaxWidth()
-            .height(BarHeight),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 8.dp,
-        tonalElevation = 3.dp,
+    Box(
+        Modifier
+            .padding(4.dp)
+            .onSizeChanged { rowWidth = it.width }
+            .pointerInput(count) {
+                fun settle() {
+                    val target = indicator.value.roundToInt().coerceIn(0, count - 1)
+                    position.dragging = false
+                    scope.launch { indicator.animateTo(target.toFloat()) }
+                    currentOnSelect(target)
+                }
+                detectHorizontalDragGestures(
+                    onDragStart = { position.dragging = true; moveTo(it.x) },
+                    onDragEnd = { settle() },
+                    onDragCancel = { settle() },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        moveTo(change.position.x)
+                    },
+                )
+            },
     ) {
-        Box(
-            Modifier
-                .padding(4.dp)
-                .onSizeChanged { rowWidth = it.width }
-                .pointerInput(count) {
-                    fun settle() {
-                        val target = indicator.value.roundToInt().coerceIn(0, count - 1)
-                        position.dragging = false
-                        scope.launch { indicator.animateTo(target.toFloat()) }
-                        currentOnSelect(target)
-                    }
-                    detectHorizontalDragGestures(
-                        onDragStart = { position.dragging = true; moveTo(it.x) },
-                        onDragEnd = { settle() },
-                        onDragCancel = { settle() },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                            moveTo(change.position.x)
-                        },
-                    )
-                },
-        ) {
-            if (count > 0 && rowWidth > 0) {
+        if (count > 0 && rowWidth > 0) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .width(with(LocalDensity.current) { (rowWidth / count).toDp() })
+                    .offset { IntOffset((indicator.value * rowWidth / count).roundToInt(), 0) }
+                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+            )
+        }
+        Row(Modifier.fillMaxSize().selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
+            labels.forEachIndexed { i, label ->
+                val isSelected = i == highlighted
                 Box(
                     Modifier
+                        .weight(1f)
                         .fillMaxHeight()
-                        .width(with(LocalDensity.current) { (rowWidth / count).toDp() })
-                        .offset { IntOffset((indicator.value * rowWidth / count).roundToInt(), 0) }
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
-                )
-            }
-            Row(Modifier.fillMaxSize().selectableGroup(), verticalAlignment = Alignment.CenterVertically) {
-                labels.forEachIndexed { i, label ->
-                    val isSelected = i == highlighted
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .selectable(
-                                selected = i == selected,
-                                role = Role.Tab,
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = { onSelect(i) },
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                        .selectable(
+                            selected = i == selected,
+                            role = Role.Tab,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onSelect(i) },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Pannelli affiancati che seguono `position` come le schede (vedi [TabPager]): durante il
+ * trascinamento sulla pillola il contenuto si muove insieme all'indicatore.
+ */
+@Composable
+fun SlidingPanes(
+    position: TabPosition,
+    count: Int,
+    modifier: Modifier = Modifier,
+    /** Spazio tra un pannello e l'altro durante lo scorrimento. */
+    gap: Dp = 0.dp,
+    content: @Composable (Int) -> Unit,
+) {
+    val gapPx = with(LocalDensity.current) { gap.toPx() }
+    Box(modifier) {
+        for (i in 0 until count) {
+            key(i) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = (i - position.value) * (size.width + gapPx)
+                            // I pannelli fuori vista non si disegnano.
+                            alpha = if (kotlin.math.abs(i - position.value) < 1f) 1f else 0f
+                        }
+                ) { content(i) }
             }
         }
     }

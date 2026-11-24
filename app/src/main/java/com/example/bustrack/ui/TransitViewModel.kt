@@ -65,6 +65,28 @@ data class FavoritesState(
     val loaded: Boolean = false,
 )
 
+/** Fermata vicina all'utente, con la distanza e le linee che ci passano. */
+data class NearbyStop(val stop: Stop, val meters: Int, val routes: List<Route>)
+
+/** Fermate vicine nella schermata iniziale. */
+sealed interface NearbyState {
+    data object Idle : NearbyState
+    /** Permesso di posizione non concesso. */
+    data object NoPermission : NearbyState
+    /** Localizzazione del telefono spenta. */
+    data object LocationOff : NearbyState
+    data object Locating : NearbyState
+    /** Nessuna posizione ricevuta in tempo. */
+    data object NoFix : NearbyState
+    data class Ready(
+        val stops: List<NearbyStop>,
+        /** Precisione della posizione in metri (null se sconosciuta). */
+        val accuracy: Int?,
+        val fetchedAt: Long = System.currentTimeMillis(),
+        val fetchedAtElapsed: Long = SystemClock.elapsedRealtime(),
+    ) : NearbyState
+}
+
 /** Popup di scelta della direzione, prima di aprire la linea. */
 data class DirectionChoice(
     val route: Route,
@@ -155,6 +177,46 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val patterns = runCatching { repo.routePatterns(fav.route.id) }.getOrDefault(listOf(fav.pattern))
             openLine(fav.route, patterns, patterns.firstOrNull { it.directionId == fav.pattern.directionId } ?: fav.pattern)
+        }
+    }
+
+    // --- Fermate vicine (schermata iniziale) ---
+    private val _nearby = MutableStateFlow<NearbyState>(NearbyState.Idle)
+    val nearby: StateFlow<NearbyState> = _nearby
+    private var nearbyJob: Job? = null
+
+    /**
+     * Cerca le fermate entro 1 km dalla posizione attuale. Senza [manual] non fa nulla se
+     * l'ultima ricerca ha meno di 2 minuti (si richiama a ogni ritorno sulla vista "Vicine").
+     */
+    fun refreshNearby(manual: Boolean = false) {
+        val current = _nearby.value
+        if (!manual && current is NearbyState.Ready &&
+            SystemClock.elapsedRealtime() - current.fetchedAtElapsed < 120_000
+        ) return
+        if (!manual && nearbyJob?.isActive == true) return
+        val context = getApplication<Application>()
+        nearbyJob?.cancel()
+        nearbyJob = viewModelScope.launch {
+            when {
+                !context.hasLocationPermission() -> { _nearby.value = NearbyState.NoPermission; return@launch }
+                !context.isLocationEnabled() -> { _nearby.value = NearbyState.LocationOff; return@launch }
+            }
+            // Durante un aggiornamento resta visibile l'elenco precedente (con la rotellina sul tasto).
+            if (_nearby.value !is NearbyState.Ready) _nearby.value = NearbyState.Locating
+            tracked(REFRESH_NEARBY, manual) {
+                val location = context.currentLocation()
+                if (location == null) {
+                    if (_nearby.value !is NearbyState.Ready) _nearby.value = NearbyState.NoFix
+                    return@tracked
+                }
+                val all = runCatching { repo.allStops() }.getOrDefault(emptyList())
+                val near = com.example.bustrack.gtfs.nearestStops(all, location.latitude, location.longitude)
+                    .map { (stop, meters) ->
+                        NearbyStop(stop, meters.toInt(), runCatching { repo.routesForStop(stop.id) }.getOrDefault(emptyList()))
+                    }
+                _nearby.value = NearbyState.Ready(near, location.takeIf { it.hasAccuracy() }?.accuracy?.toInt())
+            }
         }
     }
 
@@ -477,6 +539,7 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         const val REFRESH_LINE = "line"
         const val REFRESH_VEHICLES = "vehicles"
         const val REFRESH_ALERTS = "alerts"
+        const val REFRESH_NEARBY = "nearby"
     }
 
     private suspend fun <T> load(block: suspend () -> T): Load<T> = try {
