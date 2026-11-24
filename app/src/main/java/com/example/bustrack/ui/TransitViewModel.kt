@@ -86,6 +86,8 @@ data class StopsState(
     val timetable: TimetableState? = null,
     /** La fermata è stata aperta dalla mappa: indietro torna alla mappa, non alla Home. */
     val openedFromMap: Boolean = false,
+    /** La linea è stata aperta dalla mappa: sotto non c'è la Home e indietro torna alla mappa. */
+    val lineFromMap: Boolean = false,
     val selected: Stop? = null,
     /** Fermata da cui è stata aperta la linea in corso: premendo indietro dalla linea si ritorna lì. */
     val returnStop: Stop? = null,
@@ -242,7 +244,31 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun dismissDirectionChoice() = _stops.update { it.copy(directionChoice = null) }
+    fun dismissDirectionChoice() = _stops.update {
+        it.copy(directionChoice = null, lineFromMap = it.lineFromMap && it.line != null)
+    }
+
+    /**
+     * Dalla mappa: apre l'elenco delle fermate della linea [label] nella scheda Home. Con una
+     * direzione nota (quella evidenziata sulla mappa o quella del mezzo toccato) la apre subito,
+     * altrimenti chiede quale (il popup compare sopra la mappa). Il passaggio alla scheda Home lo fa
+     * la UI quando la linea è aperta (vedi BusTrackApp): annullando il popup si resta sulla mappa.
+     */
+    fun openLineFromMap(label: String, routeId: String?, directionId: Int?) {
+        viewModelScope.launch {
+            val route = routeId?.let { runCatching { repo.route(it) }.getOrNull() }
+                ?: runCatching { repo.searchRoutes(label) }.getOrDefault(emptyList())
+                    .firstOrNull { it.label.equals(label.trim(), ignoreCase = true) }
+                ?: return@launch
+            val patterns = runCatching { repo.routePatterns(route.id) }.getOrDefault(emptyList())
+            if (patterns.isEmpty()) return@launch
+            goToStopsHome()
+            _stops.update { it.copy(lineFromMap = true) }
+            val pattern = patterns.firstOrNull { it.directionId == directionId } ?: patterns.singleOrNull()
+            if (pattern != null) openLine(route, patterns, pattern)
+            else _stops.update { it.copy(directionChoice = DirectionChoice(route, patterns)) }
+        }
+    }
 
     fun openLine(route: Route, patterns: List<RoutePattern>, pattern: RoutePattern, fromStop: Stop? = null) {
         if (fromStop != null) arrivalsJob?.cancel()
@@ -356,7 +382,10 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         lineJob?.cancel()
         val back = _stops.value.returnStop
         val fromMap = _stops.value.returnStopFromMap
-        _stops.update { it.copy(line = null, returnStop = null, returnStopFromMap = false) }
+        // Chiudendo la linea aperta dalla mappa (senza una fermata a cui tornare) si torna alla Home normale.
+        _stops.update {
+            it.copy(line = null, returnStop = null, returnStopFromMap = false, lineFromMap = it.lineFromMap && back != null)
+        }
         if (back != null) {
             selectStop(back)
             if (fromMap) _stops.update { it.copy(openedFromMap = true) }

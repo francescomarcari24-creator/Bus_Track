@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -117,6 +118,7 @@ fun VehicleMap(
     highlightDirection: Int?,
     onOpenStop: (Stop) -> Unit,
     loadRoutes: suspend (Stop) -> List<Route>,
+    onOpenLine: (VehiclePosition) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -374,7 +376,7 @@ fun VehicleMap(
         if (showStops) {
             stops.firstOrNull { it.id == selectedStopId }?.let { StopCard(it, loadRoutes, onOpenStop, cardModifier) }
         } else {
-            vehicles.firstOrNull { it.vehicleId == selectedId }?.let { VehicleCard(it, cardModifier) }
+            vehicles.firstOrNull { it.vehicleId == selectedId }?.let { VehicleCard(it, onOpenLine, cardModifier) }
         }
     }
 }
@@ -542,7 +544,7 @@ private fun StopCard(stop: Stop, loadRoutes: suspend (Stop) -> List<Route>, onOp
 }
 
 @Composable
-private fun VehicleCard(v: VehiclePosition, modifier: Modifier) {
+private fun VehicleCard(v: VehiclePosition, onOpenLine: (VehiclePosition) -> Unit, modifier: Modifier) {
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -560,6 +562,11 @@ private fun VehicleCard(v: VehiclePosition, modifier: Modifier) {
                 v.label?.let { "Vettura $it" },
                 v.timestamp?.let { "Posizione delle " + HHMM.format(Instant.ofEpochSecond(it)) },
             ).forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            // Elenco fermate della linea, nella direzione di questo mezzo.
+            TextButton(
+                onClick = { onOpenLine(v) },
+                colors = ButtonDefaults.textButtonColors(contentColor = LiveTheme.colors.onLiveContainer),
+            ) { Text("Fermate della linea →") }
         }
     }
 }

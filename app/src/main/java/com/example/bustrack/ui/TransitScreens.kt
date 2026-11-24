@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -82,6 +83,9 @@ internal val LocalTabBack = staticCompositionLocalOf<() -> Unit> { {} }
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
 
+/** Apre l'elenco fermate di una linea nella scheda Home, dalla mappa (numero, route_id e direzione se noti). */
+internal val LocalOpenLineFromMap = staticCompositionLocalOf<(label: String, routeId: String?, directionId: Int?) -> Unit> { { _, _, _ -> } }
+
 /**
  * Posizione standard dei pulsanti "indietro": senza margine interno a sinistra, così la freccia
  * parte dallo stesso punto della prima lettera del titolo sotto (nome della fermata, linea, ...).
@@ -123,6 +127,15 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             openTab(0)
         }
     }
+    // Dalla mappa: apre l'elenco fermate della linea nella scheda Home; indietro torna alla mappa.
+    val openLineFromMap = remember(vm) {
+        { label: String, routeId: String?, directionId: Int? -> vm.openLineFromMap(label, routeId, directionId) }
+    }
+    // Si passa alla Home solo a linea aperta: l'eventuale popup della direzione compare sopra la
+    // mappa e, se annullato, si resta lì. Ogni nuova apertura della linea ha un openId diverso.
+    val stopsState by vm.stops.collectAsStateWithLifecycle()
+    val lineFromMapId = stopsState.line?.openId?.takeIf { stopsState.lineFromMap }
+    LaunchedEffect(lineFromMapId) { if (lineFromMapId != null) openTab(0) }
     // Dalla linea: apre la scheda Mappa (livello bus) filtrata su quella linea, con inquadratura sul tracciato.
     val showLineOnMap = remember(vm) {
         { label: String, directionId: Int, headsign: String? ->
@@ -159,6 +172,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         LocalScrollMemory provides scrollMemory,
         LocalBottomBarInset provides barInset,
         LocalOpenStop provides openStop,
+        LocalOpenLineFromMap provides openLineFromMap,
         LocalShowLineOnMap provides showLineOnMap,
         LocalTabBack provides tabBack,
     ) {
@@ -213,11 +227,12 @@ private fun StopsState.pageStack(): List<StopsPage> = if (openedFromMap && selec
     // Aperta dalla mappa: nessuna pagina "sotto"; indietro è il ritorno alla scheda precedente (la mappa).
     listOf(StopsPage.Stop)
 } else buildList {
-    add(StopsPage.Home)
+    // Linea aperta dalla mappa: la Home non sta sotto, indietro dalla linea torna alla mappa.
+    if (!lineFromMap) add(StopsPage.Home)
     if (line != null) add(StopsPage.Line)
     if (timetable != null) add(StopsPage.Timetable)
     if (selected != null) add(StopsPage.Stop)
-}
+}.ifEmpty { listOf(StopsPage.Home) }
 
 @Composable
 private fun StopsScreen(vm: TransitViewModel) {
@@ -474,12 +489,24 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 vehicles.isEmpty() -> "Nessun mezzo in servizio" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
                 else -> "${shown.size} mezzi" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
             }
-            Text(
-                status,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (!showStops && state is Load.Failed) MaterialTheme.colorScheme.error else Color.Unspecified,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            val openLine = LocalOpenLineFromMap.current
+            // Linea valida nel filtro: si può aprire l'elenco delle sue fermate.
+            val lineLabel = filter.trim().takeIf { it.isNotEmpty() && (lineShapes.isNotEmpty() || !stopIds.isNullOrEmpty()) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    status,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (!showStops && state is Load.Failed) MaterialTheme.colorScheme.error else Color.Unspecified,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).weight(1f),
+                )
+                if (lineLabel != null) {
+                    TextButton(
+                        onClick = { openLine(lineLabel, null, lineChoice?.directionId) },
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) { Text("Fermate →", style = MaterialTheme.typography.labelLarge) }
+                }
+            }
             VehicleMap(
                 vehicles = if (showStops) emptyList() else shown,
                 showStops = showStops,
@@ -489,6 +516,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 highlightDirection = lineChoice?.directionId,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
+                onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {

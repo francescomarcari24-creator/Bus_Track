@@ -102,8 +102,14 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         val refreshing by vm.refreshing.collectAsStateWithLifecycle()
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-            val returnStop = vm.stops.collectAsStateWithLifecycle().value.returnStop
-            TextButton(onClick = vm::closeLine, contentPadding = BackButtonPadding) { BackLabel(returnStop?.name ?: "Ricerca") }
+            val stopsState = vm.stops.collectAsStateWithLifecycle().value
+            val returnStop = stopsState.returnStop
+            // Aperta dalla mappa: indietro torna alla scheda Mappa (la linea resta sotto, come una fermata dalla mappa).
+            val backToMap = stopsState.lineFromMap && returnStop == null
+            val tabBack = LocalTabBack.current
+            TextButton(onClick = if (backToMap) tabBack else vm::closeLine, contentPadding = BackButtonPadding) {
+                BackLabel(returnStop?.name ?: if (backToMap) "Mappa" else "Ricerca")
+            }
             Spacer(Modifier.weight(1f))
             val showOnMap = LocalShowLineOnMap.current
             IconButton(onClick = { showOnMap(line.route.label, line.pattern.directionId, line.pattern.headsign) }) {
