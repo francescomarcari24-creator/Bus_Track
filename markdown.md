@@ -151,7 +151,6 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
 - Nel livello fermate: evidenziare le fermate di una linea in ordine di percorso e/o fermate vicine alla posizione dell'utente.
 - Tracciato: mostrare le varianti del percorso (oggi solo il tracciato più frequente); scegliere/cambiare la direzione direttamente dalla mappa; nascondere i bus dell'altra direzione quando ne è scelta una.
-- Sostituire `ListItem` deprecato (nuova API Compose) per eliminare i warning.
 
 ---
 
@@ -187,3 +186,4 @@ Formato: data — cosa è cambiato (file principali).
 
 ### 2026-11-24
 1. **Posizione dell'utente sulla mappa** (`VehicleMap.kt`, `AndroidManifest.xml`, `ScrollMemory.locationAsked`): pallino GPS con cerchio di precisione (LocationComponent di MapLibre, motore di posizione di Android, senza Play Services). Il permesso si chiede una volta per sessione, quando la scheda Mappa diventa visibile (le schede sono composte tutte insieme: l'effetto dipende da `LocalInBackPreview`). Tasto "La mia posizione" in alto a destra (icona Material `my_location` disegnata a mano, non presente in `material-icons-core`): centra sulla posizione (zoom almeno 15,5) e la segue; spostando la mappa smette di seguirla e l'icona torna grigia. Senza permesso, il tasto lo richiede. Provato sul telefono.
+2. **Warning di Gradle eliminati** (`TransitScreens.kt`, `LineScreen.kt`): i 7 `ListItem` usavano l'overload deprecato in Material3 1.5.0; il titolo (`headlineContent`) ora è la lambda finale `content`. Build senza warning Kotlin.

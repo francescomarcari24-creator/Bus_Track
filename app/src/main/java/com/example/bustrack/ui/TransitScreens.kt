@@ -329,21 +329,19 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     items(state.routeResults, key = { "route-" + it.id }) { route ->
                         ListItem(
                             leadingContent = { RouteBadge(route.label) },
-                            headlineContent = { Text("Linea ${route.label}") },
                             supportingContent = {
                                 Text(listOfNotNull(route.longName, route.agencyName).joinToString(" · "))
                             },
                             modifier = Modifier.clickable { vm.onRouteClick(route) },
-                        )
+                        ) { Text("Linea ${route.label}") }
                     }
                     if (state.results.isNotEmpty()) item { SectionTitle("Fermate") }
                 }
                 items(state.results, key = { it.id }) { stop ->
                     ListItem(
-                        headlineContent = { Text(stop.name) },
                         supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
                         modifier = Modifier.clickable { vm.selectStop(stop) },
-                    )
+                    ) { Text(stop.name) }
                 }
             }
         }
@@ -357,7 +355,6 @@ private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { RouteBadge(a.routeLabel, live = a.isRealtime) },
-        headlineContent = { Text(a.headsign ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             val status = if (!a.isRealtime) {
                 " · programmato"
@@ -384,7 +381,7 @@ private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
                 color = if (a.isRealtime) LiveTheme.colors.live else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-    )
+    ) { Text(a.headsign ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
 
 @Composable
@@ -519,7 +516,6 @@ private fun VehiclesScreen(vm: TransitViewModel) {
 private fun VehicleRow(v: VehiclePosition) {
     ListItem(
         leadingContent = { RouteBadge(v.routeLabel, live = true) },
-        headlineContent = { Text(v.headsign?.let { "→ $it" } ?: "Mezzo ${v.label ?: v.vehicleId}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(
                 listOfNotNull(
@@ -530,7 +526,7 @@ private fun VehicleRow(v: VehiclePosition) {
                 maxLines = 2,
             )
         },
-    )
+    ) { Text(v.headsign?.let { "→ $it" } ?: "Mezzo ${v.label ?: v.vehicleId}", maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
 
 @Composable
@@ -598,20 +594,18 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
         items(favorites.lines, key = { "fav-line-${it.route.id}-${it.pattern.directionId}" }) { fav ->
             ListItem(
                 leadingContent = { RouteBadge(fav.route.label) },
-                headlineContent = { Text("→ ${fav.pattern.headsign ?: "Direzione ${fav.pattern.directionId}"}") },
                 supportingContent = fav.pattern.fromStopName?.let { from -> { Text("da $from") } },
                 modifier = Modifier.clickable { vm.openFavoriteLine(fav) },
-            )
+            ) { Text("→ ${fav.pattern.headsign ?: "Direzione ${fav.pattern.directionId}"}") }
         }
     }
     if (favorites.stops.isNotEmpty()) {
         item { SectionTitle("Fermate preferite") }
         items(favorites.stops, key = { "fav-stop-" + it.id }) { stop ->
             ListItem(
-                headlineContent = { Text(stop.name) },
                 supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
                 modifier = Modifier.clickable { vm.selectStop(stop) },
-            )
+            ) { Text(stop.name) }
         }
     }
 }

@@ -62,12 +62,11 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
             Column(Modifier.clip(CardCorner)) {
                 choice.patterns.forEach { pattern ->
                     ListItem(
-                        headlineContent = {
-                            Text("→ ${pattern.headsign ?: "Direzione ${pattern.directionId}"}", fontWeight = FontWeight.Bold)
-                        },
                         supportingContent = pattern.fromStopName?.let { from -> { Text("da $from · ${pattern.stopIds.size} fermate") } },
                         modifier = Modifier.clickable { onPick(pattern) },
-                    )
+                    ) {
+                        Text("→ ${pattern.headsign ?: "Direzione ${pattern.directionId}"}", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         },
