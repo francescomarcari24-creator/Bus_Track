@@ -111,9 +111,10 @@ class StopWidgetConfigActivity : ComponentActivity() {
         }
         StopWidget().update(this, glanceId)
         StopWidgetWorker.schedule(this)
+        // Primi passaggi subito, senza aspettare il ciclo dei 15 minuti: come lavoro di sistema,
+        // perché un aggiornamento lanciato da qui verrebbe annullato chiudendo questa schermata.
+        StopWidgetWorker.runNow(applicationContext)
         setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
         finish()
-        // Primi passaggi subito, senza aspettare il ciclo dei 15 minuti.
-        StopWidget.refresh(applicationContext, glanceId)
     }
 }

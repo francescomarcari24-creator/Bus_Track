@@ -23,6 +23,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Uscendo dall'app (es. verso la schermata principale) i widget si aggiornano subito.
+        com.example.bustrack.widget.StopWidgetWorker.runNowIfAny(this)
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_OPEN_STOP_ID)?.let { PendingStopOpen.stopId.value = it }
