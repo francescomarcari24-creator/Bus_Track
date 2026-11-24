@@ -21,9 +21,15 @@ android {
 
     buildTypes {
         release {
+            // Firmata con la chiave di debug per poterla installare sul telefono di prova sopra
+            // la debug (stessa firma: preferiti e impostazioni restano). Da sostituire con una
+            // chiave di rilascio vera prima di pubblicare l'app.
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // Su tutta l'app: limitarla ad alcuni pacchetti (packageScope) rendeva inaccessibili
+                // classi di Kotlin usate anche fuori da quei pacchetti (IllegalAccessError all'avvio).
+                // Regole di conservazione in src/main/keepRules/.
             }
         }
     }

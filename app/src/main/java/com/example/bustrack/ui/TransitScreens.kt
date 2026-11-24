@@ -843,7 +843,7 @@ internal fun FavoriteButton(isFavorite: Boolean, onClick: () -> Unit) {
 internal fun RefreshButton(refreshing: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, enabled = !refreshing) {
         if (refreshing) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spinner(Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
             Icon(painterResource(R.drawable.ic_refresh), contentDescription = "Aggiorna")
         }
@@ -887,7 +887,22 @@ private fun <T> LoadContent(state: Load<List<T>>, empty: String, content: @Compo
 @Composable
 private fun Loading() {
     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+        Spinner()
+    }
+}
+
+/**
+ * Rotellina di caricamento che gira solo quando è sullo schermo. Le schede e i pannelli nascosti
+ * restano composti (trasparenti): una rotellina infinita lì obbligava l'app a disegnare ogni
+ * fotogramma (~120 al secondo) anche da ferma. Fuori schermo resta un arco fermo.
+ */
+@Composable
+internal fun Spinner(modifier: Modifier = Modifier, strokeWidth: androidx.compose.ui.unit.Dp? = null) {
+    val width = strokeWidth ?: androidx.compose.material3.ProgressIndicatorDefaults.CircularStrokeWidth
+    if (LocalTabOnScreen.current) {
+        CircularProgressIndicator(modifier, strokeWidth = width)
+    } else {
+        CircularProgressIndicator(progress = { 0.25f }, modifier = modifier, strokeWidth = width)
     }
 }
 

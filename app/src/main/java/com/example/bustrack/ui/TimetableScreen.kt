@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -71,7 +70,7 @@ fun TimetableScreen(state: TimetableState, vm: TransitViewModel) {
         }
         HorizontalDivider()
         when (val load = state.departures) {
-            Load.Idle, Load.Loading -> CircularProgressIndicator(Modifier.padding(32.dp).align(Alignment.CenterHorizontally))
+            Load.Idle, Load.Loading -> Spinner(Modifier.padding(32.dp).align(Alignment.CenterHorizontally))
             is Load.Failed -> Text("Errore: ${load.message}", color = MaterialTheme.colorScheme.error)
             is Load.Ready -> if (load.value.isEmpty()) {
                 Text("Nessuna partenza programmata in questo giorno", modifier = Modifier.padding(top = 16.dp))

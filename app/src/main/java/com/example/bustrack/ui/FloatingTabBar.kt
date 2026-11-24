@@ -64,6 +64,13 @@ private val BarSideMargin = 32.dp
  */
 val LocalBottomBarInset = staticCompositionLocalOf { 0.dp }
 
+/**
+ * true se la scheda è sullo schermo: quella attuale, una che sta scorrendo dentro, o quella
+ * che si scopre sotto durante il gesto indietro. Le schede nascoste restano composte ma non
+ * devono lavorare (la mappa smette di disegnare).
+ */
+val LocalTabOnScreen = staticCompositionLocalOf { true }
+
 @Composable
 fun bottomBarInset(): Dp {
     val system = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
@@ -139,7 +146,10 @@ fun TabPager(
                         .then(if (isPreview) Modifier.backPreviewScrim(gesture) else Modifier)
                 ) {
                     // Scheda nascosta o in anteprima: nessun aggiornamento periodico né finestre di dialogo.
-                    CompositionLocalProvider(LocalInBackPreview provides (!active || isPreview)) { content(i) }
+                    CompositionLocalProvider(
+                        LocalInBackPreview provides (!active || isPreview),
+                        LocalTabOnScreen provides (active || isPreview),
+                    ) { content(i) }
                 }
             }
         }
@@ -303,9 +313,13 @@ fun SlidingPanes(
     content: @Composable (Int) -> Unit,
 ) {
     val gapPx = with(LocalDensity.current) { gap.toPx() }
+    val parentOnScreen = LocalTabOnScreen.current
     Box(modifier) {
         for (i in 0 until count) {
             key(i) {
+                // Pannello visibile (anche in parte, durante lo scorrimento): solo allora le sue
+                // animazioni girano. derivedStateOf: si ricompone al cambio, non a ogni fotogramma.
+                val paneOnScreen by remember { derivedStateOf { kotlin.math.abs(i - position.value) < 1f } }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -314,7 +328,9 @@ fun SlidingPanes(
                             // I pannelli fuori vista non si disegnano.
                             alpha = if (kotlin.math.abs(i - position.value) < 1f) 1f else 0f
                         }
-                ) { content(i) }
+                ) {
+                    CompositionLocalProvider(LocalTabOnScreen provides (parentOnScreen && paneOnScreen)) { content(i) }
+                }
             }
         }
     }

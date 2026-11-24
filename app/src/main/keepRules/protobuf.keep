@@ -1,0 +1,7 @@
+# Regole per l'ottimizzazione R8 della build release.
+
+# GTFS-Realtime: le classi generate da protobuf-java leggono i campi per riflessione
+# (nomi dei metodi), quindi non vanno rinominate né rimosse.
+-keep class com.google.transit.realtime.** { *; }
+-keep class com.google.protobuf.** { *; }
+-dontwarn com.google.protobuf.**

@@ -356,22 +356,25 @@ fun VehicleMap(
         source.setGeoJson(collection)
     }
 
+    // Ciclo di vita della mappa: segue quello dell'app, ma solo finché la scheda Mappa è sullo
+    // schermo. Nascosta (Home, Avvisi) va in pausa e smette di disegnare: con la TextureView ogni
+    // fotogramma della mappa obbliga a ricomporre tutta la finestra, quindi lasciarla attiva in
+    // sottofondo teneva l'app a ~120 fotogrammi al secondo anche da ferma. Non viene distrutta:
+    // tornando sulla scheda riparte da dov'era, senza ricaricare stile e dati.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, mapView) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
-                else -> Unit
-            }
-        }
+    val onScreen = LocalTabOnScreen.current
+    var appState by remember { mutableStateOf(lifecycle.currentState) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> appState = event.targetState }
         lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val mapLifecycle = remember(mapView) { MapViewLifecycle(mapView) }
+    val target = if (onScreen) appState else minOf(appState, Lifecycle.State.CREATED)
+    LaunchedEffect(mapLifecycle, target) { mapLifecycle.moveTo(target) }
+    DisposableEffect(mapLifecycle) {
         onDispose {
-            lifecycle.removeObserver(observer)
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onPause()
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) mapView.onStop()
+            mapLifecycle.moveTo(Lifecycle.State.CREATED)
             mapView.onDestroy()
         }
     }
@@ -622,7 +625,11 @@ private fun MapLibreMap.enableUserLocation(context: Context, style: Style) {
     if (!lc.isLocationComponentActivated) {
         lc.activateLocationComponent(
             LocationComponentActivationOptions.builder(context, style)
-                .locationComponentOptions(LocationComponentOptions.builder(context).pulseEnabled(true).build())
+                .locationComponentOptions(
+                    // Niente pulsazione: è un'animazione infinita che obbligava la mappa a
+                    // ridisegnare a ogni fotogramma. Restano pallino e cerchio di precisione.
+                    LocationComponentOptions.builder(context).pulseEnabled(false).build()
+                )
                 .useDefaultLocationEngine(true)
                 .build()
         )
@@ -648,6 +655,20 @@ private val MyLocationIcon: ImageVector by lazy {
         ),
         fill = SolidColor(androidx.compose.ui.graphics.Color.Black),
     ).build()
+}
+
+/** Porta la MapView (già creata con onCreate) nello stato richiesto: avviata, attiva o ferma. */
+private class MapViewLifecycle(private val mapView: MapView) {
+    private var state = Lifecycle.State.CREATED
+
+    fun moveTo(target: Lifecycle.State) {
+        val goal = target.coerceIn(Lifecycle.State.CREATED, Lifecycle.State.RESUMED)
+        if (goal >= Lifecycle.State.STARTED && state < Lifecycle.State.STARTED) mapView.onStart()
+        if (goal >= Lifecycle.State.RESUMED && state < Lifecycle.State.RESUMED) mapView.onResume()
+        if (goal < Lifecycle.State.RESUMED && state >= Lifecycle.State.RESUMED) mapView.onPause()
+        if (goal < Lifecycle.State.STARTED && state >= Lifecycle.State.STARTED) mapView.onStop()
+        state = goal
+    }
 }
 
 private fun createMapView(context: Context): MapView {
