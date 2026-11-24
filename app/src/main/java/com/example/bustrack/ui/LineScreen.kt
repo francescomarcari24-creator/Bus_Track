@@ -89,12 +89,19 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
     val listKey = "line:${line.openId}"
     val listState = memory.list(listKey)
     val inPreview = LocalInBackPreview.current
+    // Avvisi che citano questa linea: in cima all'elenco delle fermate.
+    LaunchedEffect(line.route.id) { vm.ensureAlerts() }
+    val allAlerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
+    val lineAlerts = allAlerts.filter { it.concerns(listOf(line.route.label), emptyList()) }
+    var alertsOpen by rememberAlertsOpen(lineAlerts)
+    // Voci prima delle fermate nell'elenco (riquadro avvisi ed eventuali avvisi aperti).
+    val headerItems = if (lineAlerts.isEmpty()) 0 else 1 + if (alertsOpen) lineAlerts.size else 0
     // Alla prima apertura scorre fino al primo mezzo del percorso (una volta sola).
     LaunchedEffect(listKey, vehiclesByStop.isNotEmpty(), line.stops.size) {
         if (inPreview || line.stops.isEmpty() || vehiclesByStop.isEmpty()) return@LaunchedEffect
         if (!memory.once(listKey)) return@LaunchedEffect
         val first = line.stops.indexOfFirst { it.id in vehiclesByStop }
-        if (first >= 0) listState.scrollToItem((first - 2).coerceAtLeast(0))
+        if (first >= 0) listState.scrollToItem((headerItems + first - 2).coerceAtLeast(0))
     }
     // Le liste di aperture precedenti della linea non servono più.
     LaunchedEffect(listKey) { if (!inPreview) memory.forgetAll("line:", except = listKey) }
@@ -155,19 +162,13 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             fontWeight = if (hasLive) FontWeight.Bold else FontWeight.Normal,
             modifier = Modifier.padding(top = 8.dp),
         )
-        // Avvisi che citano questa linea.
-        LaunchedEffect(line.route.id) { vm.ensureAlerts() }
-        val allAlerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
-        AlertsBanner(
-            allAlerts.filter { it.concerns(listOf(line.route.label), emptyList()) },
-            "questa linea",
-            Modifier.padding(top = 8.dp),
-        )
         if (line.patterns.size > 1) {
             TextButton(onClick = vm::switchDirection, contentPadding = BackButtonPadding) { Text("⇄ Cambia direzione") }
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        // Un solo elenco fino in fondo allo schermo: avvisi della linea (se ci sono), poi le fermate.
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
+            alertsBanner(lineAlerts, "questa linea", alertsOpen) { alertsOpen = !alertsOpen }
             itemsIndexed(line.stops, key = { i, stop -> "$i-${stop.id}" }) { i, stop ->
                 LineStopRow(
                     stop = stop,

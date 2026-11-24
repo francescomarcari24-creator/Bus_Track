@@ -357,25 +357,29 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             LaunchedEffect(selected.id) { vm.ensureAlerts() }
             val allAlerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
             val stopAlerts = allAlerts.filter { it.concerns(state.routes.map { r -> r.label }, listOf(selected.id)) }
-            AlertsBanner(stopAlerts, "questa fermata", Modifier.padding(top = 8.dp))
-            HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            when (val load = state.arrivals) {
-                Load.Idle, Load.Loading -> Loading()
-                is Load.Failed -> ErrorText(load.message)
-                is Load.Ready -> {
-                    val result = load.value
-                    if (!result.realtimeAvailable) {
-                        Text(
-                            "Dati live non disponibili: mostro gli orari programmati",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(bottom = 8.dp),
-                        )
-                    }
-                    if (result.arrivals.isEmpty()) {
-                        Text("Nessun passaggio nelle prossime 2 ore")
-                    } else {
-                        LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
+            var alertsOpen by rememberAlertsOpen(stopAlerts)
+            // Un solo elenco fino in fondo allo schermo: avvisi (se ci sono), poi gli arrivi.
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
+                alertsBanner(stopAlerts, "questa fermata", alertsOpen) { alertsOpen = !alertsOpen }
+                item(key = "divider") { HorizontalDivider(Modifier.padding(vertical = 12.dp)) }
+                when (val load = state.arrivals) {
+                    Load.Idle, Load.Loading -> item(key = "loading") { Loading() }
+                    is Load.Failed -> item(key = "error") { ErrorText(load.message) }
+                    is Load.Ready -> {
+                        val result = load.value
+                        if (!result.realtimeAvailable) {
+                            item(key = "no-live") {
+                                Text(
+                                    "Dati live non disponibili: mostro gli orari programmati",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                )
+                            }
+                        }
+                        if (result.arrivals.isEmpty()) {
+                            item(key = "empty") { Text("Nessun passaggio nelle prossime 2 ore") }
+                        } else {
                             items(result.arrivals, key = { it.tripId + it.time }) { a ->
                                 ArrivalRow(
                                     a,
@@ -810,43 +814,46 @@ private fun AlertsScreen(vm: TransitViewModel) {
 }
 
 /**
- * Riquadro "⚠ N avvisi" nelle pagine di linea e fermata: chiuso mostra solo il conteggio e il
- * primo titolo, toccandolo si aprono gli avvisi completi. Non compare se non ci sono avvisi.
+ * Riquadro "⚠ N avvisi" nelle pagine di linea e fermata, come voci in cima all'elenco della pagina:
+ * chiuso mostra il conteggio e il primo titolo; aperto, gli avvisi seguono come voci dello stesso
+ * elenco, che scorre fino in fondo allo schermo insieme ad arrivi o fermate. Niente se non ci sono avvisi.
  */
-@Composable
-internal fun AlertsBanner(alerts: List<ServiceAlert>, what: String, modifier: Modifier = Modifier) {
+internal fun LazyListScope.alertsBanner(alerts: List<ServiceAlert>, what: String, open: Boolean, onToggle: () -> Unit) {
     if (alerts.isEmpty()) return
-    var open by rememberSaveable(alerts.map { it.id }) { mutableStateOf(false) }
-    Card(
-        modifier.fillMaxWidth().clickable { open = !open },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        ),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(
-                "⚠ " + (if (alerts.size == 1) "1 avviso" else "${alerts.size} avvisi") + " per $what" +
-                    if (open) "" else " · tocca per leggere",
-                style = MaterialTheme.typography.labelLarge,
-            )
-            if (!open) {
+    item(key = "alerts-banner") {
+        Card(
+            Modifier.fillMaxWidth().padding(top = 8.dp).clickable(onClick = onToggle),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            ),
+        ) {
+            Column(Modifier.padding(12.dp)) {
                 Text(
-                    alerts.first().header,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
+                    "⚠ " + (if (alerts.size == 1) "1 avviso" else "${alerts.size} avvisi") + " per $what" +
+                        if (open) " · tocca per chiudere" else " · tocca per leggere",
+                    style = MaterialTheme.typography.labelLarge,
                 )
+                if (!open) {
+                    Text(
+                        alerts.first().header,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
         }
     }
     if (open) {
-        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            alerts.forEach { AlertCard(it) }
-        }
+        items(alerts, key = { "alert-" + it.id }) { Box(Modifier.padding(top = 8.dp)) { AlertCard(it) } }
     }
 }
+
+/** Stato aperto/chiuso del riquadro avvisi, ricordato finché gli avvisi restano gli stessi. */
+@Composable
+internal fun rememberAlertsOpen(alerts: List<ServiceAlert>) = rememberSaveable(alerts.map { it.id }) { mutableStateOf(false) }
 
 @Composable
 internal fun AlertCard(a: ServiceAlert) {
