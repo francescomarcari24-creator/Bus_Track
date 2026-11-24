@@ -15,6 +15,19 @@ fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Doub
     return 2 * r * asin(sqrt(a))
 }
 
+/**
+ * Direzione iniziale (gradi da 0 a 360, in senso orario dal nord) per andare dal primo punto al
+ * secondo lungo il cerchio massimo: è l'angolo con cui ruotare una freccia che punta a nord.
+ */
+fun bearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val phi1 = Math.toRadians(lat1)
+    val phi2 = Math.toRadians(lat2)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val y = sin(dLon) * cos(phi2)
+    val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(dLon)
+    return (Math.toDegrees(kotlin.math.atan2(y, x)) + 360.0) % 360.0
+}
+
 /** Fermate entro [maxMeters] dal punto, dalla più vicina, al massimo [limit]; con la distanza in metri. */
 fun nearestStops(
     stops: List<Stop>,

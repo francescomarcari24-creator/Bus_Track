@@ -91,9 +91,9 @@ class TransitRepository(private val context: Context) {
         val p = parser()
         val db = static()
         return withContext(Dispatchers.IO) {
-            val live = runCatching {
-                fetch(RomeFeeds.TRIP_UPDATES) { p.parseTripUpdates(it) }.items
-                    .filter { it.stopId == stopId && it.time >= nowEpochSeconds - 60 }
+            val snapshot = runCatching { fetch(RomeFeeds.TRIP_UPDATES) { p.parseTripUpdates(it) } }
+            val live = snapshot.map { s ->
+                s.items.filter { it.stopId == stopId && it.time >= nowEpochSeconds - 60 }
             }
             val liveArrivals = live.getOrDefault(emptyList())
             val liveTrips = liveArrivals.mapTo(HashSet()) { it.tripId }
@@ -111,6 +111,7 @@ class TransitRepository(private val context: Context) {
             StopArrivals(
                 arrivals = (liveArrivals + scheduled).sortedBy { it.time },
                 realtimeAvailable = live.isSuccess,
+                feedTimestamp = snapshot.getOrNull()?.feedTimestamp,
             )
         }
     }

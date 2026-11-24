@@ -156,6 +156,15 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     val stopsState by vm.stops.collectAsStateWithLifecycle()
     val lineFromMapId = stopsState.line?.openId?.takeIf { stopsState.lineFromMap }
     LaunchedEffect(lineFromMapId) { if (lineFromMapId != null) openTab(0) }
+    // Popup della direzione: sta qui, fuori dalle schede, perché deve comparire sopra qualunque
+    // scheda (dentro la Home verrebbe soppresso quando la Home non è visibile, es. dalla mappa).
+    stopsState.directionChoice?.let { choice ->
+        DirectionDialog(
+            choice = choice,
+            onPick = { vm.openLine(choice.route, choice.allPatterns, it, choice.fromStop) },
+            onDismiss = vm::dismissDirectionChoice,
+        )
+    }
     // Dalla linea: apre la scheda Mappa (livello bus) filtrata su quella linea, con inquadratura sul tracciato.
     val showLineOnMap = remember(vm) {
         { label: String, directionId: Int, headsign: String? ->
@@ -258,15 +267,6 @@ private fun StopsState.pageStack(): List<StopsPage> = if (openedFromMap && selec
 private fun StopsScreen(vm: TransitViewModel) {
     val state by vm.stops.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
-    if (!LocalInBackPreview.current) {
-        state.directionChoice?.let { choice ->
-            DirectionDialog(
-                choice = choice,
-                onPick = { vm.openLine(choice.route, choice.allPatterns, it, choice.fromStop) },
-                onDismiss = vm::dismissDirectionChoice,
-            )
-        }
-    }
     val stack = state.pageStack()
     PredictiveBackLayer(
         enabled = stack.size > 1,
@@ -516,23 +516,20 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     LaunchedEffect(filter) { vm.setMapLineFilter(filter) }
     // Direzione scelta dalla schermata della linea: vale finché il filtro resta su quella linea.
     val lineChoice = memory.mapLineChoice?.takeIf { it.label.equals(filter.trim(), ignoreCase = true) }
-    // Aggiornamento automatico finché la scheda è visibile: ogni 60 s sulla mappa, ogni 30 s
-    // sulla lista. Passando da una vista all'altra non si ricarica subito: si aspetta che i dati
-    // abbiano raggiunto l'età prevista dal nuovo intervallo.
+    // Aggiornamento automatico finché la scheda è visibile (mappa e lista), agganciato alla
+    // centrale: si riscarica appena esce il nuovo feed (~ogni 30 s, vedi FeedTiming). Tornando
+    // sulla scheda non si ricarica se il feed scaricato è ancora l'ultimo pubblicato.
     val inPreview = LocalInBackPreview.current
-    LaunchedEffect(showMap, showStops, inPreview) {
+    LaunchedEffect(showStops, inPreview) {
         // Il livello fermate è statico: niente download dei mezzi finché è attivo.
         if (inPreview || showStops) return@LaunchedEffect
-        val intervalMs = if (showMap) 60_000L else 30_000L
         while (true) {
-            val fetchedAt = (vm.vehicles.value as? Load.Ready)?.fetchedAtElapsed
-            val age = fetchedAt?.let { android.os.SystemClock.elapsedRealtime() - it } ?: Long.MAX_VALUE
-            if (age >= intervalMs) {
-                vm.refreshVehicles().join()
-                kotlinx.coroutines.delay(intervalMs)
-            } else {
-                kotlinx.coroutines.delay(intervalMs - age)
-            }
+            val current = vm.vehicles.value
+            val wait = if (current is Load.Ready) TransitViewModel.liveDelayMs(current.feedTimestamp) else 0
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            vm.refreshVehicles().join()
+            // Mai scaricato con successo: niente tentativi a raffica.
+            if (vm.vehicles.value !is Load.Ready) kotlinx.coroutines.delay(10_000)
         }
     }
     val vehicles = (state as? Load.Ready)?.value.orEmpty()
@@ -600,7 +597,9 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 )
                 if (lineLabel != null) {
                     TextButton(
-                        onClick = { openLine(lineLabel, null, lineChoice?.directionId) },
+                        // Sempre prima la scelta della direzione (popup sopra la mappa), anche se sulla
+                        // mappa ne è evidenziata una; si apre diretta solo una linea con una direzione sola.
+                        onClick = { openLine(lineLabel, null, null) },
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         modifier = Modifier.height(32.dp),
                     ) { Text("Fermate →", style = MaterialTheme.typography.labelLarge) }
@@ -616,6 +615,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },
+                termini = vm.termini.collectAsStateWithLifecycle().value,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -658,7 +658,25 @@ private fun VehicleRow(v: VehiclePosition) {
 @Composable
 private fun AlertsScreen(vm: TransitViewModel) {
     val state by vm.alerts.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { if (state is Load.Idle) vm.refreshAlerts() }
+    // Finché la scheda è visibile si riscarica appena la centrale pubblica i nuovi avvisi
+    // (ogni 5 minuti esatti, vedi FeedTiming).
+    val inPreview = LocalInBackPreview.current
+    LaunchedEffect(inPreview) {
+        if (inPreview) return@LaunchedEffect
+        while (true) {
+            val current = vm.alerts.value
+            val wait = if (current !is Load.Ready) 0 else current.feedTimestamp?.let {
+                com.example.bustrack.gtfs.nextFeedDelayMs(
+                    it, System.currentTimeMillis(),
+                    periodS = com.example.bustrack.gtfs.FeedTiming.ALERTS_PERIOD_S,
+                    lagMs = com.example.bustrack.gtfs.FeedTiming.ALERTS_LAG_MS,
+                )
+            } ?: 60_000
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            vm.refreshAlerts().join()
+            if (vm.alerts.value !is Load.Ready) kotlinx.coroutines.delay(30_000)
+        }
+    }
     Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Avvisi attivi", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))

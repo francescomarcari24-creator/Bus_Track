@@ -47,6 +47,8 @@ import com.example.bustrack.gtfs.Route
 import com.example.bustrack.gtfs.RouteShape
 import com.example.bustrack.gtfs.Stop
 import com.example.bustrack.gtfs.VehiclePosition
+import com.example.bustrack.gtfs.bearingDegrees
+import com.example.bustrack.gtfs.distanceMeters
 import com.example.bustrack.ui.theme.LiveTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -87,6 +89,11 @@ private val ROME_CENTER = LatLng(41.9028, 12.4964)
 private const val SOURCE_ID = "vehicles"
 private const val CIRCLE_LAYER = "vehicles-circle"
 private const val LABEL_LAYER = "vehicles-label"
+/** Freccia nel pallino del mezzo, orientata verso il suo capolinea. */
+private const val ARROW_LAYER = "vehicles-arrow"
+private const val ARROW_IMAGE = "vehicle-arrow"
+/** Sotto questa distanza dal capolinea la freccia non si mostra (direzione instabile). */
+private const val ARROW_MIN_METERS = 100.0
 private const val ROUTE_SOURCE = "route"
 private const val ROUTE_OTHER_LAYER = "route-other"
 private const val ROUTE_CASING_LAYER = "route-casing"
@@ -98,7 +105,7 @@ private const val STOP_COUNT_LAYER = "stops-cluster-count"
 private const val STOP_POINT_LAYER = "stops-point"
 private const val STOP_LABEL_LAYER = "stops-label"
 
-private val VEHICLE_LAYERS = listOf(CIRCLE_LAYER, LABEL_LAYER)
+private val VEHICLE_LAYERS = listOf(CIRCLE_LAYER, ARROW_LAYER, LABEL_LAYER)
 private val STOP_LAYERS = listOf(STOP_CLUSTER_LAYER, STOP_COUNT_LAYER, STOP_POINT_LAYER, STOP_LABEL_LAYER)
 
 /**
@@ -119,6 +126,8 @@ fun VehicleMap(
     onOpenStop: (Stop) -> Unit,
     loadRoutes: suspend (Stop) -> List<Route>,
     onOpenLine: (VehiclePosition) -> Unit,
+    /** Capolinea per linea e direzione (chiave [terminusKey]): la freccia del pallino punta lì. */
+    termini: Map<String, Stop>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -177,18 +186,32 @@ fun VehicleMap(
                 loaded.addSource(GeoJsonSource(SOURCE_ID))
                 loaded.addLayer(
                     CircleLayer(CIRCLE_LAYER, SOURCE_ID).withProperties(
-                        PropertyFactory.circleRadius(6f),
+                        // Abbastanza grande da contenere la freccia del capolinea.
+                        PropertyFactory.circleRadius(7f),
                         PropertyFactory.circleColor(dotColor),
                         PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
                         PropertyFactory.circleStrokeWidth(2f),
                     )
+                )
+                // Freccia bianca nel pallino, ruotata verso il capolinea (proprietà "bearing", in gradi).
+                loaded.addImage(ARROW_IMAGE, arrowBitmap(context.resources.displayMetrics.density))
+                loaded.addLayer(
+                    SymbolLayer(ARROW_LAYER, SOURCE_ID)
+                        .withFilter(Expression.has("bearing"))
+                        .withProperties(
+                            PropertyFactory.iconImage(ARROW_IMAGE),
+                            PropertyFactory.iconRotate(Expression.get("bearing")),
+                            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                            PropertyFactory.iconAllowOverlap(true),
+                            PropertyFactory.iconIgnorePlacement(true),
+                        )
                 )
                 loaded.addLayer(
                     SymbolLayer(LABEL_LAYER, SOURCE_ID).withProperties(
                         PropertyFactory.textField(Expression.get("label")),
                         PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
                         PropertyFactory.textSize(12f),
-                        PropertyFactory.textOffset(arrayOf(0f, -1.3f)),
+                        PropertyFactory.textOffset(arrayOf(0f, -1.4f)),
                         PropertyFactory.textColor(dotColor),
                         PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
                         PropertyFactory.textHaloWidth(2f),
@@ -255,7 +278,7 @@ fun VehicleMap(
     }
 
     // Aggiorna i punti a ogni nuovo snapshot del feed.
-    LaunchedEffect(style, vehicles) {
+    LaunchedEffect(style, vehicles, termini) {
         val source = style?.getSourceAs<GeoJsonSource>(SOURCE_ID) ?: return@LaunchedEffect
         source.setGeoJson(
             FeatureCollection.fromFeatures(
@@ -263,6 +286,12 @@ fun VehicleMap(
                     Feature.fromGeometry(Point.fromLngLat(v.lon, v.lat)).apply {
                         addStringProperty("id", v.vehicleId)
                         addStringProperty("label", v.routeLabel)
+                        val terminus = v.routeId?.let { r -> v.directionId?.let { d -> termini[terminusKey(r, d)] } }
+                        if (terminus != null &&
+                            distanceMeters(v.lat, v.lon, terminus.lat, terminus.lon) >= ARROW_MIN_METERS
+                        ) {
+                            addNumberProperty("bearing", bearingDegrees(v.lat, v.lon, terminus.lat, terminus.lon))
+                        }
                     }
                 }
             )
@@ -574,7 +603,7 @@ private fun VehicleCard(v: VehiclePosition, onOpenLine: (VehiclePosition) -> Uni
 private fun MapLibreMap.vehicleAt(latLng: LatLng): String? {
     val p = projection.toScreenLocation(latLng)
     val r = 24f
-    return queryRenderedFeatures(RectF(p.x - r, p.y - r, p.x + r, p.y + r), CIRCLE_LAYER, LABEL_LAYER)
+    return queryRenderedFeatures(RectF(p.x - r, p.y - r, p.x + r, p.y + r), CIRCLE_LAYER, ARROW_LAYER, LABEL_LAYER)
         .firstOrNull()?.getStringProperty("id")
 }
 
@@ -627,4 +656,27 @@ private fun createMapView(context: Context): MapView {
     // (la scheda mappa scorre insieme alla barra).
     val options = MapLibreMapOptions.createFromAttributes(context).textureMode(true)
     return MapView(context, options).apply { onCreate(null) }
+}
+
+/**
+ * Freccia di navigazione bianca che punta in alto (nord), da ruotare con `icon-rotate`:
+ * punta, due alette e una tacca al centro della base, per stare dentro il pallino da 7 dp.
+ */
+private fun arrowBitmap(density: Float): android.graphics.Bitmap {
+    val size = (10 * density).toInt().coerceAtLeast(10)
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val s = size.toFloat()
+    val path = android.graphics.Path().apply {
+        moveTo(s * 0.5f, s * 0.06f)
+        lineTo(s * 0.9f, s * 0.92f)
+        lineTo(s * 0.5f, s * 0.7f)
+        lineTo(s * 0.1f, s * 0.92f)
+        close()
+    }
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.FILL
+    }
+    android.graphics.Canvas(bitmap).drawPath(path, paint)
+    return bitmap
 }

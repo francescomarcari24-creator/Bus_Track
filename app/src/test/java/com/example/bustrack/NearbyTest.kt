@@ -1,6 +1,7 @@
 package com.example.bustrack
 
 import com.example.bustrack.gtfs.Stop
+import com.example.bustrack.gtfs.bearingDegrees
 import com.example.bustrack.gtfs.distanceMeters
 import com.example.bustrack.gtfs.nearestStops
 import org.junit.Assert.assertEquals
@@ -17,6 +18,16 @@ class NearbyTest {
         val d = distanceMeters(venezia.lat, venezia.lon, colosseo.lat, colosseo.lon)
         assertEquals(1_000.0, d, 100.0)
         assertEquals(0.0, distanceMeters(1.0, 2.0, 1.0, 2.0), 0.001)
+    }
+
+    @Test
+    fun bearingPointsTheRightWay() {
+        assertEquals(0.0, bearingDegrees(41.0, 12.0, 42.0, 12.0), 0.5)    // nord
+        assertEquals(90.0, bearingDegrees(41.0, 12.0, 41.0, 12.1), 0.5)   // est
+        assertEquals(180.0, bearingDegrees(42.0, 12.0, 41.0, 12.0), 0.5)  // sud
+        assertEquals(270.0, bearingDegrees(41.0, 12.1, 41.0, 12.0), 0.5)  // ovest
+        // Da Venezia al Colosseo: verso sud-est.
+        assertEquals(130.0, bearingDegrees(venezia.lat, venezia.lon, colosseo.lat, colosseo.lon), 10.0)
     }
 
     @Test

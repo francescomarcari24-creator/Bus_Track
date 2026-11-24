@@ -75,6 +75,8 @@ data class StopArrivals(
     val arrivals: List<Arrival>,
     /** false se il feed live non era raggiungibile: si mostrano solo orari programmati. */
     val realtimeAvailable: Boolean,
+    /** Timestamp del feed live usato (epoch secondi), per agganciare l'aggiornamento alla centrale. */
+    val feedTimestamp: Long? = null,
 )
 
 /** Posizione di un mezzo, dal feed VehiclePositions. */

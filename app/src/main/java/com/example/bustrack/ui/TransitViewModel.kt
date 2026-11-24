@@ -31,6 +31,8 @@ sealed interface Load<out T> {
         val fetchedAt: Long = System.currentTimeMillis(),
         /** Stesso istante su orologio monotono: per calcolare l'età dei dati senza salti d'ora. */
         val fetchedAtElapsed: Long = SystemClock.elapsedRealtime(),
+        /** Timestamp del feed live della centrale (epoch secondi), se il dato viene da un feed. */
+        val feedTimestamp: Long? = null,
     ) : Load<T>
     data class Failed(val message: String) : Load<Nothing>
 }
@@ -64,6 +66,9 @@ data class FavoritesState(
     val stops: List<Stop> = emptyList(),
     val loaded: Boolean = false,
 )
+
+/** Chiave di linea e direzione per [TransitViewModel.termini]. */
+internal fun terminusKey(routeId: String, directionId: Int) = "$routeId:$directionId"
 
 /** Fermata vicina all'utente, con la distanza e le linee che ci passano. */
 data class NearbyStop(val stop: Stop, val meters: Int, val routes: List<Route>)
@@ -364,21 +369,23 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         lineJob = viewModelScope.launch {
             before()
             var first = manual
+            var feedTs: Long? = null
             while (isActive) {
                 val result = tracked(REFRESH_LINE, first) {
-                    load {
-                        repo.vehiclePositions().items.filter {
+                    loadFeed({ repo.vehiclePositions() }) { items ->
+                        items.filter {
                             it.routeId == route.id && (it.directionId == null || it.directionId == pattern.directionId)
                         }
                     }
                 }
                 first = false
+                (result as? Load.Ready)?.feedTimestamp?.let { feedTs = it }
                 _stops.update { s ->
                     val current = s.line ?: return@update s
                     if (result is Load.Failed && current.vehicles is Load.Ready) s
                     else s.copy(line = current.copy(vehicles = result))
                 }
-                delay(30_000)
+                delay(liveDelayMs(feedTs))
             }
         }
     }
@@ -486,18 +493,49 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         arrivalsJob = viewModelScope.launch {
             before()
             var first = manual
-            // I feed RT di Roma si aggiornano ogni ~30 s.
+            var feedTs: Long? = null
+            // Si riscarica appena la centrale pubblica il nuovo feed (vedi FeedTiming).
             // Se il live non risponde, arrivalsAt restituisce comunque gli orari programmati.
             while (isActive) {
                 val result = tracked(REFRESH_ARRIVALS, first) { load { repo.arrivalsAt(stop.id) } }
                 first = false
+                (result as? Load.Ready)?.value?.feedTimestamp?.let { feedTs = it }
                 _stops.update { s ->
                     // Se un refresh fallisce, mantieni gli ultimi arrivi noti.
                     if (result is Load.Failed && s.arrivals is Load.Ready) s else s.copy(arrivals = result)
                 }
-                delay(30_000)
+                delay(liveDelayMs(feedTs))
             }
         }
+    }
+
+    // --- Capolinea dei mezzi sulla mappa (per la freccia nel pallino) ---
+    private val _termini = MutableStateFlow<Map<String, Stop>>(emptyMap())
+    /** Capolinea per linea e direzione (chiave [terminusKey]), per i mezzi visti finora. */
+    val termini: StateFlow<Map<String, Stop>> = _termini
+    /** Linea e direzione senza capolinea utilizzabile (circolari, dati mancanti): non si ricercano. */
+    private val terminiMissing = HashSet<String>()
+
+    /** Cerca il capolinea delle coppie linea/direzione nuove: ultima fermata del percorso tipico. */
+    private suspend fun loadTermini(vehicles: List<VehiclePosition>) {
+        val wanted = vehicles.mapNotNull { v ->
+            val route = v.routeId ?: return@mapNotNull null
+            val dir = v.directionId ?: return@mapNotNull null
+            terminusKey(route, dir) to (route to dir)
+        }.toMap().filterKeys { it !in _termini.value && it !in terminiMissing }
+        if (wanted.isEmpty()) return
+        val found = HashMap(_termini.value)
+        val patternsByRoute = HashMap<String, List<RoutePattern>>()
+        for ((key, routeAndDir) in wanted) {
+            val (route, dir) = routeAndDir
+            val patterns = patternsByRoute.getOrPut(route) { runCatching { repo.routePatterns(route) }.getOrDefault(emptyList()) }
+            val ids = patterns.firstOrNull { it.directionId == dir }?.stopIds.orEmpty()
+            // Linea circolare: il capolinea coincide con la partenza, la freccia non direbbe nulla.
+            val last = ids.lastOrNull()?.takeIf { it != ids.first() }
+            val stop = last?.let { runCatching { repo.stopsInOrder(listOf(it)) }.getOrNull()?.firstOrNull() }
+            if (stop != null) found[key] = stop else terminiMissing += key
+        }
+        _termini.value = found
     }
 
     /** [manual] = premuto il tasto aggiorna: mostra la rotellina. */
@@ -505,19 +543,22 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         val previous = _vehicles.value
         if (previous !is Load.Ready) _vehicles.value = Load.Loading
         val result = tracked(REFRESH_VEHICLES, manual) {
-            load { repo.vehiclePositions().items.sortedWith(compareBy({ it.routeLabel.length }, { it.routeLabel })) }
+            loadFeed({ repo.vehiclePositions() }) { it.sortedWith(compareBy({ v -> v.routeLabel.length }, { v -> v.routeLabel })) }
         }
         // Un refresh fallito non cancella le ultime posizioni note.
         _vehicles.value = if (result is Load.Failed && previous is Load.Ready) previous else result
+        // I capolinea arrivano subito dopo: i pallini si vedono intanto, le frecce poco dopo.
+        // Lavoro separato: chi attende questo aggiornamento (il ciclo della mappa) non aspetta anche i capolinea.
+        if (result is Load.Ready) viewModelScope.launch { loadTermini(result.value) }
     }
 
     fun refreshAlerts(manual: Boolean = false) = viewModelScope.launch {
         val previous = _alerts.value
         if (previous !is Load.Ready) _alerts.value = Load.Loading
         val result = tracked(REFRESH_ALERTS, manual) {
-            load {
+            loadFeed({ repo.serviceAlerts() }) { items ->
                 val now = System.currentTimeMillis() / 1000
-                repo.serviceAlerts().items.filter { it.isActiveAt(now) }
+                items.filter { it.isActiveAt(now) }
             }
         }
         _alerts.value = if (result is Load.Failed && previous is Load.Ready) previous else result
@@ -534,12 +575,32 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /**
+         * Attesa del prossimo download di un feed live da ~30 s: appena la centrale pubblica il
+         * nuovo feed. Senza timestamp (mai scaricato con successo) si riprova dopo 10 s.
+         */
+        fun liveDelayMs(feedTs: Long?): Long =
+            if (feedTs == null) 10_000 else com.example.bustrack.gtfs.nextFeedDelayMs(feedTs, System.currentTimeMillis())
+
         private val ROME: java.time.ZoneId = java.time.ZoneId.of("Europe/Rome")
         const val REFRESH_ARRIVALS = "arrivals"
         const val REFRESH_LINE = "line"
         const val REFRESH_VEHICLES = "vehicles"
         const val REFRESH_ALERTS = "alerts"
         const val REFRESH_NEARBY = "nearby"
+    }
+
+    /** Come [load], per un feed live: il risultato conserva il timestamp del feed della centrale. */
+    private suspend fun <S, T> loadFeed(
+        fetch: suspend () -> com.example.bustrack.gtfs.RealtimeSnapshot<S>,
+        map: (List<S>) -> T,
+    ): Load<T> = try {
+        val snapshot = fetch()
+        Load.Ready(map(snapshot.items), feedTimestamp = snapshot.feedTimestamp)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Load.Failed(e.message ?: e.javaClass.simpleName)
     }
 
     private suspend fun <T> load(block: suspend () -> T): Load<T> = try {
