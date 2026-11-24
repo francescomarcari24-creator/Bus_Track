@@ -123,7 +123,16 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     // Ogni scheda compare una sola volta (riaprirla la sposta in cima), quindi al massimo
     // tre passi indietro prima di uscire dall'app.
     var history by rememberSaveable { mutableStateOf(listOf(0)) }
-    val scrollMemory = remember { ScrollMemory() }
+    // L'ultima scelta "Preferiti / Vicine" della Home resta anche chiudendo e riaprendo l'app.
+    val uiPrefs = LocalContext.current.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+    val scrollMemory = remember {
+        ScrollMemory().apply { homeShowNearby = uiPrefs.getBoolean(PREF_HOME_SHOW_NEARBY, false) }
+    }
+    LaunchedEffect(scrollMemory) {
+        snapshotFlow { scrollMemory.homeShowNearby }.collect {
+            uiPrefs.edit().putBoolean(PREF_HOME_SHOW_NEARBY, it).apply()
+        }
+    }
     val tab = history.last()
     val tabPosition = rememberTabPosition(tab)
     fun openTab(i: Int) {
@@ -726,6 +735,9 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
         }
     }
 }
+
+/** Chiave (preferenze "ui") dell'ultima vista scelta nella Home: true = fermate vicine. */
+private const val PREF_HOME_SHOW_NEARBY = "home_show_nearby"
 
 /** Riquadro di "Preferiti" e "Vicine" nella Home: angoli della CardCorner solo in alto. */
 private val HomePanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
