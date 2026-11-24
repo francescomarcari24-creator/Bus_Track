@@ -240,9 +240,11 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                     selected = tab,
                     onSelect = { i ->
                         // "Home" riporta sempre alla schermata iniziale (preferiti + ricerca),
-                        // "Mappa" alla mappa generale con tutti i bus (es. dopo aver aperto una fermata).
+                        // "Mappa" alla mappa generale con tutti i bus (es. dopo aver aperto una fermata),
+                        // "Avvisi" all'elenco completo (senza la ricerca per linea).
                         if (i == 0) vm.goToStopsHome()
                         if (i == 1) scrollMemory.resetMap()
+                        if (i == 2) scrollMemory.alertsQuery = ""
                         openTab(i)
                     },
                     position = tabPosition,
