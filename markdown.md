@@ -23,7 +23,7 @@ Ultimo aggiornamento: 2026-11-24
 - **Le prove si fanno sul telefono collegato** (Samsung Galaxy S23, `SM-S911B`, seriale adb `RFCTC0EWJAD`, 1080×2340, tema scuro, colori dinamici), **non sull'emulatore**.
 - Per pilotare la UI via adb: toccare gli elementi cercando testo / `content-desc` con `uiautomator dump`, non a coordinate fisse. Per scrivere nella ricerca toccare `class="android.widget.EditText"`. **Chiudere la tastiera Samsung prima di scorrere** (`input keyevent 4` se `mInputShown=true`; ESC non la chiude).
 - Git: branch `main` (rinominato da `master` il 2026-11-23), primo commit il 2026-11-23 (autore "Francesco Marcari", identità Git impostata globalmente). Fare commit e push solo se richiesto.
-- GitHub: `origin` = https://github.com/francescomarcari24-creator/Bus_Track (push via HTTPS con Git Credential Manager; la GitHub CLI `gh` non è installata).
+- GitHub: `origin` = https://github.com/francescomarcari24-creator/Bus_Track (push via HTTPS; la GitHub CLI `gh` è installata e autenticata).
 
 ## 2. Ambiente
 
@@ -36,6 +36,7 @@ Ultimo aggiornamento: 2026-11-24
   - `androidx.lifecycle:lifecycle-runtime-compose` e `lifecycle-viewmodel-compose`
 - Permessi: `INTERNET`, `ACCESS_FINE_LOCATION` e `ACCESS_COARSE_LOCATION` (posizione sulla mappa, chiesta a runtime)
 - Python 3 (solo stdlib) per lo script del database.
+- Build da terminale: serve `JAVA_HOME` sul JDK 25 di Android Studio (`C:\Program Files\Android\Android Studio1\jbr`) e `local.properties` con `sdk.dir=C:/Users/franc/AppData/Local/Android/Sdk` (non versionato). `adb` è in `C:\Users\franc\AppData\Local\Android\Sdk\platform-tools` (non nel PATH).
 
 ## 3. Fonti dati
 
