@@ -2,6 +2,9 @@ package com.example.bustrack.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,8 +33,14 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material3.AlertDialog
+import com.example.bustrack.watch.ArrivalWatch
+import com.example.bustrack.watch.ArrivalWatchService
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -278,6 +287,42 @@ private fun StopsScreen(vm: TransitViewModel) {
 private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: FavoritesState, vm: TransitViewModel) {
     val selected = state.selected
     if (page == StopsPage.Stop && selected != null) {
+        // Avviso "il mio bus sta arrivando": passaggio seguito, scelta della soglia e permesso notifiche.
+        val context = LocalContext.current
+        val watch by ArrivalWatchService.current.collectAsStateWithLifecycle()
+        var watchCandidate by remember { mutableStateOf<Arrival?>(null) }
+        var pendingWatch by remember { mutableStateOf<ArrivalWatch?>(null) }
+        val notificationPermission = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            val w = pendingWatch
+            pendingWatch = null
+            if (granted && w != null) {
+                ArrivalWatchService.start(context, w)
+            } else if (w != null) {
+                android.widget.Toast.makeText(
+                    context, "Senza il permesso delle notifiche non posso avvisarti", android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+        watchCandidate?.let { a ->
+            WatchDialog(
+                arrival = a,
+                onPick = { minutes ->
+                    watchCandidate = null
+                    val w = ArrivalWatch(selected.id, selected.name, a.tripId, a.routeLabel, a.headsign, minutes)
+                    if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        ArrivalWatchService.start(context, w)
+                    } else {
+                        pendingWatch = w
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+                onDismiss = { watchCandidate = null },
+            )
+        }
         Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -308,6 +353,11 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+            // Avvisi che citano questa fermata o le linee che ci passano.
+            LaunchedEffect(selected.id) { vm.ensureAlerts() }
+            val allAlerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
+            val stopAlerts = allAlerts.filter { it.concerns(state.routes.map { r -> r.label }, listOf(selected.id)) }
+            AlertsBanner(stopAlerts, "questa fermata", Modifier.padding(top = 8.dp))
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             when (val load = state.arrivals) {
                 Load.Idle, Load.Loading -> Loading()
@@ -327,7 +377,18 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     } else {
                         LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomBarInset.current)) {
                             items(result.arrivals, key = { it.tripId + it.time }) { a ->
-                                ArrivalRow(a, onClick = { vm.onStopRouteClick(a.routeId) })
+                                ArrivalRow(
+                                    a,
+                                    watched = watch?.tripId == a.tripId && watch?.stopId == selected.id,
+                                    onWatch = {
+                                        if (watch?.tripId == a.tripId && watch?.stopId == selected.id) {
+                                            ArrivalWatchService.stop(context)
+                                        } else {
+                                            watchCandidate = a
+                                        }
+                                    },
+                                    onClick = { vm.onStopRouteClick(a.routeId) },
+                                )
                             }
                         }
                     }
@@ -462,7 +523,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
 }
 
 @Composable
-private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
+private fun ArrivalRow(a: Arrival, watched: Boolean, onWatch: () -> Unit, onClick: () -> Unit) {
     val now = System.currentTimeMillis() / 1000
     val minutes = ((a.time - now) / 60).coerceAtLeast(0)
     AppListItem(
@@ -486,13 +547,23 @@ private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
             )
         },
         trailingContent = {
-            // Live in grassetto e verde; programmato in grigio.
-            Text(
-                if (minutes == 0L) "ora" else "$minutes'",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (a.isRealtime) FontWeight.Bold else FontWeight.Normal,
-                color = if (a.isRealtime) LiveTheme.colors.live else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Live in grassetto e verde; programmato in grigio.
+                Text(
+                    if (minutes == 0L) "ora" else "$minutes'",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (a.isRealtime) FontWeight.Bold else FontWeight.Normal,
+                    color = if (a.isRealtime) LiveTheme.colors.live else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // Campanella: avvisami quando questo passaggio è vicino (piena se lo stai seguendo).
+                IconButton(onClick = onWatch) {
+                    Icon(
+                        if (watched) Icons.Filled.Notifications else Icons.Outlined.Notifications,
+                        contentDescription = if (watched) "Smetti di seguire" else "Avvisami quando arriva",
+                        tint = if (watched) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                    )
+                }
+            }
         },
     ) { Text(a.headsign ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
@@ -510,6 +581,11 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     val stopIds by vm.mapStopIds.collectAsStateWithLifecycle()
     val openStop = LocalOpenStop.current
     LaunchedEffect(showStops) { if (showStops) vm.ensureMapStops() }
+    // Fermate vicine evidenziate nel livello fermate: si cerca la posizione se c'è il permesso.
+    val nearby by vm.nearby.collectAsStateWithLifecycle()
+    val mapContext = LocalContext.current
+    LaunchedEffect(showStops) { if (showStops && mapContext.hasLocationPermission()) vm.refreshNearby() }
+    val nearStopIds = (nearby as? NearbyState.Ready)?.stops?.mapTo(HashSet()) { it.stop.id }.orEmpty()
     // Il filtro per linea vale per il livello attivo: mezzi della linea, oppure fermate della linea.
     // Con una linea valida si vede anche il suo tracciato, in entrambi i livelli.
     val lineShapes by vm.mapLineShapes.collectAsStateWithLifecycle()
@@ -532,9 +608,17 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             if (vm.vehicles.value !is Load.Ready) kotlinx.coroutines.delay(10_000)
         }
     }
+    val linePatterns by vm.mapLinePatterns.collectAsStateWithLifecycle()
     val vehicles = (state as? Load.Ready)?.value.orEmpty()
     val shown = if (filter.isBlank()) vehicles
-    else vehicles.filter { it.routeLabel.equals(filter.trim(), ignoreCase = true) }
+    else vehicles.filter {
+        it.routeLabel.equals(filter.trim(), ignoreCase = true) &&
+            // Con una direzione scelta i mezzi dell'altra non si vedono (senza direzione nel feed restano).
+            (lineChoice == null || it.directionId == null || it.directionId == lineChoice.directionId)
+    }
+    // Fermate: con una direzione scelta solo quelle del suo percorso.
+    val shownStopIds = lineChoice?.let { c -> linePatterns.firstOrNull { it.directionId == c.directionId } }
+        ?.stopIds?.toSet() ?: stopIds
     // Le fermate si vedono sempre sulla mappa; l'elenco esiste solo per i bus.
     val mapVisible = showStops || showMap
     Column(Modifier.fillMaxSize()) {
@@ -571,7 +655,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             // Riga di stato sopra la mappa. La mappa è sempre presente (anche a feed vuoto) e resta
             // la stessa quando si passa da bus a fermate: cambia solo il livello mostrato.
             val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
-            val total = stopIds?.size ?: mapStops.size
+            val total = shownStopIds?.size ?: mapStops.size
             val direction = lineChoice?.headsign?.let { "Direzione → $it · " }.orEmpty()
             val status = direction + when {
                 showStops && mapStops.isEmpty() -> "Carico le fermate…"
@@ -602,17 +686,40 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                     ) { Text("Fermate →", style = MaterialTheme.typography.labelLarge) }
                 }
             }
+            // Scelta della direzione direttamente sulla mappa (linea filtrata con più direzioni).
+            if (lineLabel != null && linePatterns.size > 1) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                ) {
+                    FilterChip(
+                        selected = lineChoice == null,
+                        onClick = { memory.mapLineChoice = null },
+                        label = { Text("Entrambe") },
+                    )
+                    linePatterns.forEach { p ->
+                        FilterChip(
+                            selected = lineChoice?.directionId == p.directionId,
+                            onClick = { memory.mapLineChoice = MapLineChoice(lineLabel, p.directionId, p.headsign) },
+                            label = { Text("→ " + (p.headsign ?: "Direzione ${p.directionId}"), maxLines = 1) },
+                        )
+                    }
+                }
+            }
             VehicleMap(
                 vehicles = if (showStops) emptyList() else shown,
                 showStops = showStops,
                 stops = mapStops,
-                visibleStopIds = stopIds,
+                visibleStopIds = shownStopIds,
                 lineShapes = lineShapes,
                 highlightDirection = lineChoice?.directionId,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },
                 termini = vm.termini.collectAsStateWithLifecycle().value,
+                nearStopIds = nearStopIds,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -680,20 +787,69 @@ private fun AlertsScreen(vm: TransitViewModel) {
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             RefreshButton(TransitViewModel.REFRESH_ALERTS in refreshing) { vm.refreshAlerts(manual = true) }
         }
+        val favorites by vm.favorites.collectAsStateWithLifecycle()
         LoadContent(state, empty = "Nessun avviso attivo") { alerts ->
+            // In cima gli avvisi che riguardano linee o fermate preferite.
+            val favLabels = favorites.lines.mapTo(HashSet()) { it.route.label }
+            val favStops = favorites.stops.mapTo(HashSet()) { it.id }
+            val (mine, others) = alerts.partition { it.concerns(favLabels, favStops) }
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 state = LocalScrollMemory.current.list("alerts"),
                 contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
             ) {
-                items(alerts, key = { it.id }) { AlertCard(it) }
+                if (mine.isNotEmpty()) {
+                    item(key = "title-mine") { SectionTitle("Per i tuoi preferiti") }
+                    items(mine, key = { "mine-" + it.id }) { AlertCard(it) }
+                    if (others.isNotEmpty()) item(key = "title-others") { SectionTitle("Tutti gli altri") }
+                }
+                items(others, key = { it.id }) { AlertCard(it) }
             }
         }
     }
 }
 
+/**
+ * Riquadro "⚠ N avvisi" nelle pagine di linea e fermata: chiuso mostra solo il conteggio e il
+ * primo titolo, toccandolo si aprono gli avvisi completi. Non compare se non ci sono avvisi.
+ */
 @Composable
-private fun AlertCard(a: ServiceAlert) {
+internal fun AlertsBanner(alerts: List<ServiceAlert>, what: String, modifier: Modifier = Modifier) {
+    if (alerts.isEmpty()) return
+    var open by rememberSaveable(alerts.map { it.id }) { mutableStateOf(false) }
+    Card(
+        modifier.fillMaxWidth().clickable { open = !open },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "⚠ " + (if (alerts.size == 1) "1 avviso" else "${alerts.size} avvisi") + " per $what" +
+                    if (open) "" else " · tocca per leggere",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            if (!open) {
+                Text(
+                    alerts.first().header,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+    if (open) {
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            alerts.forEach { AlertCard(it) }
+        }
+    }
+}
+
+@Composable
+internal fun AlertCard(a: ServiceAlert) {
     var expanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
         Column(Modifier.padding(12.dp)) {
@@ -753,6 +909,42 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
 
 /** Chiave (preferenze "ui") dell'ultima vista scelta nella Home: true = fermate vicine. */
 private const val PREF_HOME_SHOW_NEARBY = "home_show_nearby"
+
+/** Soglie proposte per l'avviso di arrivo, in minuti. */
+private val WatchThresholds = listOf(1, 3, 5, 10)
+
+/** Scelta di quando essere avvisati per un passaggio: solo le soglie non ancora raggiunte. */
+@Composable
+private fun WatchDialog(arrival: Arrival, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    val minutes = ((arrival.time - System.currentTimeMillis() / 1000) / 60).coerceAtLeast(0)
+    val options = WatchThresholds.filter { it < minutes }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Avvisami per il ${arrival.routeLabel}" + (arrival.headsign?.let { " → $it" } ?: "")) },
+        text = {
+            Column {
+                if (options.isEmpty()) {
+                    Text("Arriva tra $minutes min: è già vicino.")
+                } else {
+                    Text(
+                        "Ti avviso con una notifica quando manca il tempo scelto, anche ad app chiusa. " +
+                            if (arrival.isRealtime) "Il bus è tracciato live." else "Per ora c'è solo l'orario programmato: " +
+                                "appena il bus sarà tracciato live userò i suoi dati.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    options.forEach { m ->
+                        TextButton(onClick = { onPick(m) }) {
+                            Text(if (m == 1) "Quando manca 1 minuto" else "Quando mancano $m minuti")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+    )
+}
 
 /** Riquadro di "Preferiti" e "Vicine" nella Home: angoli della CardCorner solo in alto. */
 private val HomePanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)

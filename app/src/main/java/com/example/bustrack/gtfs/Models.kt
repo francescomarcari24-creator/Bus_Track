@@ -50,6 +50,8 @@ class RouteShape(
     val directionId: Int,
     val lat: DoubleArray,
     val lon: DoubleArray,
+    /** true = tracciato principale (il più frequente); false = variante del percorso. */
+    val main: Boolean = true,
 )
 
 /** Stato del mezzo rispetto a [VehiclePosition.currentStopId] (GTFS-RT VehicleStopStatus). */
@@ -69,7 +71,26 @@ data class Arrival(
     val vehicleId: String?,
     /** true = previsione dal feed live, false = orario programmato dal GTFS statico. */
     val isRealtime: Boolean = true,
+    /** service_id GTFS della corsa (solo per gli orari programmati). */
+    val serviceId: String? = null,
 )
+
+/** Gruppo di servizio di un service_id di Roma: la parte prima del trattino ("0#57-4926" → "0#57"). */
+fun serviceGroup(serviceId: String): String = serviceId.substringBefore('-')
+
+/**
+ * Toglie gli orari programmati "fantasma". Il GTFS di Roma a volte pubblica per la stessa linea
+ * due servizi alternativi (es. linea 8, novembre 2026: `0#35` e `0#57`), ma i mezzi ne effettuano
+ * uno solo. Se una linea ha corse live ([liveGroupsByRoute]: linea → gruppi di servizio delle sue
+ * corse live), si tengono solo i programmati dei gruppi effettivamente in servizio; le linee senza
+ * dati live restano com'erano.
+ */
+fun dropUntrackedSchedules(scheduled: List<Arrival>, liveGroupsByRoute: Map<String, Set<String>>): List<Arrival> =
+    scheduled.filter { a ->
+        val groups = a.routeId?.let { liveGroupsByRoute[it] }
+        val service = a.serviceId
+        groups.isNullOrEmpty() || service == null || serviceGroup(service) in groups
+    }
 
 data class StopArrivals(
     val arrivals: List<Arrival>,
@@ -108,6 +129,10 @@ data class ServiceAlert(
     /** Periodi attivi (epoch secondi); null = aperto. */
     val activePeriods: List<Pair<Long?, Long?>>,
 ) {
+    /** true se l'avviso cita almeno una di queste linee (per numero) o fermate (per id). */
+    fun concerns(routeLabels: Collection<String>, stopIds: Collection<String>): Boolean =
+        routeLabels.any { it in this.routeLabels } || stopIds.any { it in this.stopIds }
+
     fun isActiveAt(epochSeconds: Long): Boolean =
         activePeriods.isEmpty() || activePeriods.any { (start, end) ->
             (start == null || epochSeconds >= start) && (end == null || epochSeconds <= end)

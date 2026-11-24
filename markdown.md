@@ -43,10 +43,11 @@ Ultimo aggiornamento: 2026-11-24
 ## 3. Fonti dati
 
 ### GTFS statico
-- File originale: `rome_static_gtfs.zip` (~47 MB zip, ~275 MB scompattato; `stop_times.txt` da solo 242 MB / 5,15 M righe).
-- Copia usata: `C:\Users\franc\Downloads\rome_static_gtfs.zip` (MD5 `302eb7054c385bca0be67845b079d555`).
-- Validità del feed attuale: **21/10/2026 → 28/12/2026** → dopo va scaricato quello nuovo e rigenerato il database.
-- L'URL `…/sites/default/files/rome_static_gtfs.zip.md5` risponde 403: lo zip va scaricato a mano.
+- URL: `https://romamobilita.it/wp-content/uploads/shared/rome_static_gtfs.zip` (~48 MB zip, ~275 MB scompattato; `stop_times.txt` da solo 243 MB / 5,18 M righe, **righe di ogni corsa consecutive e in ordine**). Ripubblicato spesso (es. 24/11/2026 20:47).
+- MD5 pubblicato in `rome_static_gtfs.zip.md5` (la HEAD risponde 403, la GET funziona: `<md5>  rsm/rome_static_gtfs.zip`).
+- Database incluso nell'app: GTFS del 24/11/2026 (MD5 `2488580448c9a636e10191cb837e7fe3`), valido **21/10/2026 → 31/12/2026**.
+- **Aggiornamento automatico sul telefono** (`gtfs/update/`): controllo giornaliero (WorkManager) dell'MD5; se cambia scarica lo zip (in Wi‑Fi, o su rete a consumo se i dati scadono entro 3 giorni), ne verifica l'MD5, ricostruisce il database con `GtfsDbBuilder` (traduzione Kotlin di `tools/build_gtfs_db.py`, ~25 s sul S23) e lo installa come `no_backup/gtfs-downloaded.db`; l'app usa il più recente tra questo e quello incluso. Verificato: database identico a quello dello script Python (tutte le tabelle, 5.175.470 orari).
+- Prova manuale (solo build debug): `adb shell am broadcast -a com.example.bustrack.DEBUG_UPDATE_GTFS -p com.example.bustrack --ez force true`.
 
 ### GTFS-Realtime (live, aggiornati ~ogni 30 s)
 Ritmo misurato il 2026-11-24 (download ogni 5 s per 6 min, confrontando `header.timestamp` e `Last-Modified`): **posizioni e arrivi** escono insieme ogni ~30 s (28–33 s), il file è pubblicato ~3 s dopo il timestamp; **avvisi** ogni 5 minuti esatti (:00, :05…), pubblicati ~10 s dopo. Nessun `Cache-Control`. L'app riscarica agganciandosi al timestamp del feed (`gtfs/FeedTiming.kt`).
@@ -63,12 +64,12 @@ Gli ID di corse (`trip_id`, es. `0#575-13`) e fermate (`stop_id`) del live coinc
 
 ## 4. Database statico `app/src/main/assets/gtfs.db`
 
-Generato da `tools/build_gtfs_db.py`. ~22 MB su disco, ~6 MB compressi nell'APK. Schema **versione 4**.
-Al primo avvio (e dopo ogni aggiornamento dell'app) viene copiato in `noBackupFilesDir` e aperto in sola lettura.
+Generato da `tools/build_gtfs_db.py` (o sul telefono da `GtfsDbBuilder`, identico). ~23 MB su disco. Schema **versione 5**.
+Al primo avvio (e dopo ogni aggiornamento dell'app) viene copiato in `noBackupFilesDir` e aperto in sola lettura; se c'è un `gtfs-downloaded.db` più recente (aggiornamento automatico) si usa quello. Un'unica istanza condivisa (`GtfsStaticDb.shared`).
 
 | Tabella | Contenuto |
 |---|---|
-| `meta` | `schema_version`, `feed_start_date`, `feed_end_date`, `built_at` |
+| `meta` | `schema_version`, `feed_start_date`, `feed_end_date`, `built_at`, `source_md5` (MD5 dello zip di origine), `built_on` (`device` se costruito sul telefono) |
 | `routes` | linee (`route_id`, nome breve/lungo, tipo, colori, agenzia) |
 | `stops` | fermate (`stop_id`, codice palina, nome, lat/lon) |
 | `trips` | corse: linea, capolinea (`headsign`), direzione, `service_id`, `profile_id`, `start_sec` |
@@ -76,7 +77,7 @@ Al primo avvio (e dopo ogni aggiornamento dell'app) viene copiato in `noBackupFi
 | `calendar_dates` | giorni in cui ogni `service_id` è attivo (solo `exception_type = 1`) |
 | `stop_routes` | quali linee passano da ogni fermata |
 | `route_patterns` | percorso **più frequente** per linea+direzione, con capolinea e lista fermate |
-| `route_shapes` | **tracciato** (da `shapes.txt`) per linea+direzione: quello usato più spesso dalle corse del percorso tipico, semplificato (Douglas-Peucker 3 m: 360k → 126k punti) e salvato come *encoded polyline* di Google (precisione 1 m) |
+| `route_shapes` | **tracciati** (da `shapes.txt`) per linea+direzione: il principale (`is_main = 1`, quello usato più spesso dalle corse del percorso tipico) e le **varianti** (≥ 2% delle corse e ≥ 2 corse, max 5), con `shape_id` e `trip_count`; semplificati (Douglas-Peucker 3 m) e salvati come *encoded polyline* di Google (precisione 1 m). 1.051 tracciati (719 principali) |
 
 **Compressione degli orari:** molte corse fanno le stesse fermate con gli stessi tempi relativi → 15.796 profili (523k righe) invece di 5,15 M righe. Orario a una fermata = `trips.start_sec + profile_stops.offset_sec` + mezzanotte del giorno di servizio.
 Gli orari GTFS possono superare 24:00; il riferimento del giorno è "mezzogiorno − 12 h" (corretto anche ai cambi d'ora).
@@ -131,7 +132,7 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 ## 7. Particolarità e problemi noti dei dati di Roma
 
 - **Versioni d'orario sovrapposte**: il feed contiene `0#…` (fino al 22/11) e `1#…` (dal 23/11); di notte le stesse corse compaiono due volte → deduplica per linea + destinazione + orario.
-- **Linea 8 (settimana 23–27/11)**: due servizi attivi insieme (`1#35` regolare e `1#57` con anche "8BUS"), stesse corse sfalsate di 1 minuto. Mostrati entrambi; da verificare di giorno confrontando coi tram live.
+- **Linea 8**: il GTFS pubblica due servizi alternativi (`0#35` e `0#57`), ma i mezzi live sono tutti di `0#57` (verificato il 24/11/2026): gli orari programmati dei servizi senza corse live vengono nascosti (`dropUntrackedSchedules`).
 - **Tram 8** risulta con 16 fermate nel percorso più frequente (probabile percorso ridotto per lavori).
 - **Ritardi/anticipi notturni**: molti bus notturni risultano "in anticipo 6–7 min"; è il valore del feed.
 - **Feed mezzi vuoto**: a volte (es. ~03:00) il feed delle posizioni risponde HTTP 200 con 0 byte; l'app mostra "Nessun mezzo in servizio" sopra la mappa.
@@ -150,7 +151,6 @@ tools/build_gtfs_db.py       → GTFS zip → gtfs.db
 
 ## 9. Idee / da fare
 
-- Verificare di giorno quale dei due orari della linea 8 è reale e, se serve, filtrare l'altro.
 - Scaricare automaticamente il GTFS statico aggiornato (oggi è manuale).
 - Nel livello fermate: evidenziare le fermate di una linea in ordine di percorso e/o fermate vicine alla posizione dell'utente.
 - Tracciato: mostrare le varianti del percorso (oggi solo il tracciato più frequente); scegliere/cambiare la direzione direttamente dalla mappa; nascondere i bus dell'altra direzione quando ne è scelta una.
@@ -201,3 +201,8 @@ Formato: data — cosa è cambiato (file principali).
 10. **Righe senza riquadro proprio nei pannelli della Home** (`AppListItem.kt` `LocalTransparentListItems`, `TransitScreens.kt`): dentro "Preferiti" e "Vicine" lo sfondo delle righe è trasparente, così resta visibile solo il riquadro grande; altrove (es. popup della direzione) le righe mantengono il loro sfondo.
 11. **Pillola "Bus / Fermate" sulla mappa** (`TransitScreens.kt`): al posto dei `SegmentedButton`, lo stesso `PillSwitch` della barra in basso e di "Preferiti / Vicine" (aspetto, tocco e trascinamento dell'indicatore); la mappa sotto non scorre, cambia solo il livello.
 12. **Fluidità** (`VehicleMap.kt` `MapViewLifecycle`, `FloatingTabBar.kt` `LocalTabOnScreen`, `TransitScreens.kt` `Spinner`, `app/build.gradle.kts`, `app/src/main/keepRules/protobuf.keep`): misurato con `dumpsys gfxinfo` che l'app ferma in Home disegnava ~120 fotogrammi/s. Cause: la mappa (TextureView) restava attiva nelle schede nascoste, con la pulsazione infinita del pallino posizione; e le rotelline di caricamento di schede/pannelli nascosti (Avvisi, Vicine) giravano sempre. Ora la mappa va in pausa fuori schermo, niente pulsazione, le rotelline girano solo se visibili: **0 fotogrammi/s a riposo**. Inoltre build release ottimizzata (R8 su tutta l'app: il `packageScope` del modello causava `IllegalAccessError` all'avvio; regole per protobuf/GTFS-RT in `keepRules`), firmata con la chiave di debug, più profili di compilazione: niente più fotogrammi saltati all'avvio (prima 34–53).
+13. **Orari fantasma nascosti** (`gtfs/Models.kt` `dropUntrackedSchedules`/`serviceGroup`, `TransitRepository.arrivalsAt`, `GtfsStaticDb.serviceIds`, `UntrackedSchedulesTest`): verificato col feed live del 24/11 sera che le corse live della linea 8 sono tutte del servizio `0#57` e nessuna di `0#35`. Regola generale: se una linea ha corse live, gli orari programmati dei suoi gruppi di servizio senza corse live non si mostrano; senza dati live si vede tutto.
+14. **Avvisi filtrati** (`TransitScreens.kt` `AlertsScreen`/`AlertsBanner`, `LineScreen.kt`, `ServiceAlert.concerns`, `TransitViewModel.ensureAlerts`): nella scheda Avvisi prima "Per i tuoi preferiti" poi "Tutti gli altri"; nelle pagine di linea e fermata un riquadro "⚠ N avvisi" apribile.
+15. **Mappa** (`TransitScreens.kt`, `VehicleMap.kt`, `TransitViewModel.mapLinePatterns`): scelta della direzione direttamente sulla mappa (Entrambe / → capolinea) con mezzi e fermate dell'altra direzione nascosti; **varianti del percorso** tratteggiate (schema DB 5); **fermate vicine** (entro 1 km) evidenziate nel livello fermate, mai raggruppate.
+16. **Avviso "il mio bus sta arrivando"** (`watch/ArrivalWatchService.kt`, campanella in `ArrivalRow`, `WatchDialog`): servizio in primo piano (`dataSync`) con notifica fissa dei minuti mancanti, aggiornata al ritmo della centrale, e notifica sonora a 1/3/5/10 min; annullabile, si ferma da solo se il bus passa o dopo 2 ore. Permessi `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE(_DATA_SYNC)`.
+17. **Aggiornamento automatico del GTFS statico** (`gtfs/update/CsvReader.kt`, `ShapeTools.kt`, `GtfsDbBuilder.kt`, `GtfsUpdater.kt`, `GtfsUpdateWorker.kt`, `GtfsStaticDb.shared/installDownloaded`, `GtfsBuilderPartsTest`; dipendenza WorkManager 2.12.0): vedi sezione 3. Database incluso rigenerato col GTFS del 24/11/2026 (schema 5).

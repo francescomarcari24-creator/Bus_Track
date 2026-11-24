@@ -155,6 +155,14 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             fontWeight = if (hasLive) FontWeight.Bold else FontWeight.Normal,
             modifier = Modifier.padding(top = 8.dp),
         )
+        // Avvisi che citano questa linea.
+        LaunchedEffect(line.route.id) { vm.ensureAlerts() }
+        val allAlerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
+        AlertsBanner(
+            allAlerts.filter { it.concerns(listOf(line.route.label), emptyList()) },
+            "questa linea",
+            Modifier.padding(top = 8.dp),
+        )
         if (line.patterns.size > 1) {
             TextButton(onClick = vm::switchDirection, contentPadding = BackButtonPadding) { Text("⇄ Cambia direzione") }
         }

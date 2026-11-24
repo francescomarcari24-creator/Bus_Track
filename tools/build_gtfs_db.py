@@ -15,6 +15,7 @@ semplificato (Douglas-Peucker, ~3 m) e salvato come polilinea codificata (algori
 """
 
 import csv
+import hashlib
 import io
 import os
 import sqlite3
@@ -40,6 +41,19 @@ def parse_time(hhmmss: str) -> int:
 
 
 SHAPE_TOLERANCE_M = 3.0
+# Varianti del percorso mostrate sulla mappa oltre al tracciato principale: quelle usate da almeno
+# il 2% delle corse della direzione (e da almeno 2 corse), al massimo 5 per direzione.
+VARIANT_MIN_SHARE = 0.02
+VARIANT_MIN_TRIPS = 2
+VARIANT_MAX = 5
+
+
+def file_md5(path: str) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def simplify(points, tolerance_m):
@@ -143,8 +157,11 @@ def main(zip_path: str, out_path: str) -> None:
         CREATE TABLE route_shapes (
             route_id TEXT NOT NULL,
             direction_id INTEGER NOT NULL,
+            shape_id TEXT NOT NULL,
+            trip_count INTEGER NOT NULL,
+            is_main INTEGER NOT NULL,
             polyline TEXT NOT NULL,
-            PRIMARY KEY (route_id, direction_id)
+            PRIMARY KEY (route_id, direction_id, shape_id)
         ) WITHOUT ROWID;
         CREATE TABLE calendar_dates (
             date INTEGER NOT NULL,
@@ -219,6 +236,8 @@ def main(zip_path: str, out_path: str) -> None:
         # (route, direzione) -> {sequenza fermate: [numero corse, {capolinea: conteggio}, {shape_id: conteggio}]}
         patterns = {}
         wanted_shapes = {}
+        # (route, direzione) -> {shape_id: numero di corse}, su tutte le corse (per le varianti)
+        shape_trips = {}
         for trip_id, (route_id, headsign, direction, service_id, shape_id) in trip_info.items():
             times = sorted(stop_times.pop(trip_id, []))
             profile_id = start = None
@@ -233,6 +252,8 @@ def main(zip_path: str, out_path: str) -> None:
                 entry[1][headsign] = entry[1].get(headsign, 0) + 1
                 if shape_id:
                     entry[2][shape_id] = entry[2].get(shape_id, 0) + 1
+                    counts = shape_trips.setdefault((route_id, direction or 0), {})
+                    counts[shape_id] = counts.get(shape_id, 0) + 1
             trip_rows.append((trip_id, route_id, headsign, direction, service_id, profile_id, start))
         db.executemany("INSERT INTO trips VALUES (?,?,?,?,?,?,?)", trip_rows)
         db.executemany(
@@ -258,8 +279,21 @@ def main(zip_path: str, out_path: str) -> None:
                 wanted_shapes[(route_id, direction)] = max(shape_counts.items(), key=lambda kv: kv[1])[0]
         db.executemany("INSERT INTO route_patterns VALUES (?,?,?,?,?)", pattern_rows)
 
-        # Legge shapes.txt tenendo solo i tracciati scelti (di ~1.200 ne servono ~700).
-        needed = set(wanted_shapes.values())
+        # Tracciati da salvare: il principale di ogni (linea, direzione) piu' le varianti frequenti.
+        shapes_to_save = {}  # (route, direzione) -> [(shape_id, corse, principale)]
+        for key, counts in shape_trips.items():
+            main = wanted_shapes.get(key)
+            total = sum(counts.values())
+            variants = sorted(
+                (sid for sid, n in counts.items()
+                 if sid != main and n >= VARIANT_MIN_TRIPS and n >= VARIANT_MIN_SHARE * total),
+                key=lambda sid: -counts[sid],
+            )[:VARIANT_MAX]
+            chosen = ([main] if main else []) + variants
+            shapes_to_save[key] = [(sid, counts.get(sid, 0), sid == main) for sid in chosen]
+
+        # Legge shapes.txt tenendo solo i tracciati scelti.
+        needed = {sid for lst in shapes_to_save.values() for sid, _, _ in lst}
         raw_shapes = {}
         for sp in rows(zf, "shapes.txt"):
             if sp["shape_id"] in needed:
@@ -268,15 +302,16 @@ def main(zip_path: str, out_path: str) -> None:
                 )
         shape_rows = []
         points_before = points_after = 0
-        for (route_id, direction), shape_id in wanted_shapes.items():
-            pts = [(lat, lon) for _, lat, lon in sorted(raw_shapes.get(shape_id, []))]
-            if len(pts) < 2:
-                continue
-            simple = simplify(pts, SHAPE_TOLERANCE_M)
-            points_before += len(pts)
-            points_after += len(simple)
-            shape_rows.append((route_id, direction, encode_polyline(simple)))
-        db.executemany("INSERT INTO route_shapes VALUES (?,?,?)", shape_rows)
+        for (route_id, direction), lst in shapes_to_save.items():
+            for shape_id, trip_count, is_main in lst:
+                pts = [(lat, lon) for _, lat, lon in sorted(raw_shapes.get(shape_id, []))]
+                if len(pts) < 2:
+                    continue
+                simple = simplify(pts, SHAPE_TOLERANCE_M)
+                points_before += len(pts)
+                points_after += len(simple)
+                shape_rows.append((route_id, direction, shape_id, trip_count, 1 if is_main else 0, encode_polyline(simple)))
+        db.executemany("INSERT INTO route_shapes VALUES (?,?,?,?,?,?)", shape_rows)
         print(f"Tracciati: {len(shape_rows)} ({points_before} -> {points_after} punti)")
 
         db.executemany(
@@ -292,10 +327,13 @@ def main(zip_path: str, out_path: str) -> None:
     db.executemany(
         "INSERT INTO meta VALUES (?,?)",
         [
-            ("schema_version", "4"),
+            ("schema_version", "5"),
             ("feed_start_date", min(dates) if dates else ""),
             ("feed_end_date", max(dates) if dates else ""),
             ("built_at", datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            # MD5 dello zip di origine: l'app lo confronta con rome_static_gtfs.zip.md5 per
+            # capire se Roma Mobilita' ha pubblicato un GTFS nuovo da scaricare.
+            ("source_md5", file_md5(zip_path)),
         ],
     )
     db.execute("CREATE INDEX stops_name ON stops(name COLLATE NOCASE)")

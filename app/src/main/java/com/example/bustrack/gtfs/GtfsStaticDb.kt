@@ -22,7 +22,7 @@ interface StaticLookup {
  * Al primo avvio, e dopo ogni aggiornamento dell'app, l'asset viene copiato
  * nella cartella privata perché SQLite non può aprire file direttamente dall'APK.
  */
-class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticLookup {
+class GtfsStaticDb private constructor(internal val db: SQLiteDatabase) : StaticLookup {
 
     private val routes: Map<String, Route> by lazy { loadRoutes() }
     private val tripCache = object : LinkedHashMap<String, Trip?>(512, 0.75f, true) {
@@ -73,13 +73,14 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
         if (routeIds.isEmpty()) return emptyList()
         val placeholders = routeIds.joinToString(",") { "?" }
         return db.rawQuery(
-            "SELECT route_id, direction_id, polyline FROM route_shapes WHERE route_id IN ($placeholders) ORDER BY route_id, direction_id",
+            "SELECT route_id, direction_id, polyline, is_main FROM route_shapes WHERE route_id IN ($placeholders) " +
+                "ORDER BY route_id, direction_id, is_main DESC, trip_count DESC",
             routeIds.toTypedArray(),
         ).use { c ->
             buildList {
                 while (c.moveToNext()) {
                     val (lat, lon) = Polyline.decode(c.getString(2))
-                    add(RouteShape(c.getString(0), c.getInt(1), lat, lon))
+                    add(RouteShape(c.getString(0), c.getInt(1), lat, lon, main = c.getInt(3) == 1))
                 }
             }
         }
@@ -123,7 +124,7 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
             val dateKey = day.year * 10000 + day.monthValue * 100 + day.dayOfMonth
             db.rawQuery(
                 """
-                SELECT t.trip_id, t.route_id, t.headsign, t.start_sec + ps.offset_sec AS sec
+                SELECT t.trip_id, t.route_id, t.headsign, t.start_sec + ps.offset_sec AS sec, t.service_id
                 FROM profile_stops ps
                 JOIN trips t ON t.profile_id = ps.profile_id
                 JOIN calendar_dates c ON c.service_id = t.service_id AND c.date = ?
@@ -147,6 +148,7 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
                         delaySeconds = null,
                         vehicleId = null,
                         isRealtime = false,
+                        serviceId = c.getString(4),
                     )
                 }
             }
@@ -157,6 +159,17 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
         return result.sortedBy { it.time }
             .distinctBy { Triple(it.routeId, it.headsign, it.time) }
             .take(limit)
+    }
+
+    /** service_id delle corse indicate (quelle sconosciute mancano dalla mappa). */
+    fun serviceIds(tripIds: Collection<String>): Map<String, String> = buildMap {
+        tripIds.distinct().chunked(500).forEach { chunk ->
+            val placeholders = chunk.joinToString(",") { "?" }
+            db.rawQuery(
+                "SELECT trip_id, service_id FROM trips WHERE trip_id IN ($placeholders)",
+                chunk.toTypedArray(),
+            ).use { c -> while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
+        }
     }
 
     /** Linee il cui numero corrisponde alla ricerca: prima l'esatta, poi quelle che iniziano così. */
@@ -268,20 +281,97 @@ class GtfsStaticDb private constructor(private val db: SQLiteDatabase) : StaticL
         private val ROME: ZoneId = ZoneId.of("Europe/Rome")
         private const val STOP_SELECT = "SELECT stop_id, code, name, lat, lon FROM stops"
 
-        /** Da chiamare fuori dal main thread: la prima volta copia ~7 MB. */
-        fun open(context: Context): GtfsStaticDb {
-            val file = File(context.noBackupFilesDir, ASSET_NAME)
+        /** Database costruito sul telefono dall'aggiornamento automatico (vedi GtfsUpdater). */
+        private const val DOWNLOADED_NAME = "gtfs-downloaded.db"
+        /** Versione dello schema che questa versione dell'app sa leggere. */
+        const val SCHEMA_VERSION = 5
+
+        /** Dati essenziali di un database (tabella meta). */
+        data class DbInfo(
+            val schemaVersion: Int,
+            val feedEndDate: String,
+            val sourceMd5: String?,
+            val builtAt: String,
+        )
+
+        fun readInfo(file: File): DbInfo? {
+            if (!file.exists()) return null
+            return runCatching {
+                SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+                    val meta = db.rawQuery("SELECT key, value FROM meta", null).use { c ->
+                        buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
+                    }
+                    DbInfo(
+                        schemaVersion = meta["schema_version"]?.toIntOrNull() ?: 0,
+                        feedEndDate = meta["feed_end_date"].orEmpty(),
+                        sourceMd5 = meta["source_md5"],
+                        builtAt = meta["built_at"].orEmpty(),
+                    )
+                }
+            }.getOrNull()
+        }
+
+        @Volatile private var shared: GtfsStaticDb? = null
+        private val lock = Any()
+
+        /** Istanza condivisa da tutta l'app (schermate e servizio di avviso). Fuori dal main thread. */
+        fun shared(context: Context): GtfsStaticDb =
+            shared ?: synchronized(lock) { shared ?: open(context.applicationContext).also { shared = it } }
+
+        /** Info del database che l'app sta usando (o userebbe all'apertura). */
+        fun currentInfo(context: Context): DbInfo? = readInfo(chooseFile(context.applicationContext))
+
+        /**
+         * Installa un database appena costruito e fa passare l'app al nuovo: la prossima richiesta
+         * lo apre; il vecchio si chiude dopo un minuto, per non interrompere letture in corso.
+         */
+        fun installDownloaded(context: Context, built: File) {
+            val target = File(context.noBackupFilesDir, DOWNLOADED_NAME)
+            val tmp = File(target.path + ".tmp")
+            built.copyTo(tmp, overwrite = true)
+            check(tmp.renameTo(target) || (target.delete() && tmp.renameTo(target))) {
+                "Impossibile installare $DOWNLOADED_NAME"
+            }
+            synchronized(lock) {
+                val old = shared
+                shared = null
+                old?.let { db ->
+                    java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(
+                        { runCatching { db.db.close() } }, 60, java.util.concurrent.TimeUnit.SECONDS,
+                    )
+                }
+            }
+        }
+
+        /**
+         * Copia l'asset se manca o se l'app è stata aggiornata; restituisce il database più
+         * recente tra quello incluso nell'app e quello scaricato.
+         */
+        private fun chooseFile(context: Context): File {
+            val asset = File(context.noBackupFilesDir, ASSET_NAME)
             val appUpdatedAt = context.packageManager
                 .getPackageInfo(context.packageName, 0).lastUpdateTime
-            if (!file.exists() || file.lastModified() < appUpdatedAt) {
-                val tmp = File(file.parentFile, "$ASSET_NAME.tmp")
+            if (!asset.exists() || asset.lastModified() < appUpdatedAt) {
+                val tmp = File(asset.parentFile, "$ASSET_NAME.tmp")
                 context.assets.open(ASSET_NAME).use { input ->
                     tmp.outputStream().use { input.copyTo(it) }
                 }
-                check(tmp.renameTo(file) || (file.delete() && tmp.renameTo(file))) {
+                check(tmp.renameTo(asset) || (asset.delete() && tmp.renameTo(asset))) {
                     "Impossibile installare $ASSET_NAME"
                 }
             }
+            // Lo scaricato vince se questa versione dell'app sa leggerlo ed è più recente
+            // (validità più lunga, o stessa validità ma costruito dopo) di quello incluso.
+            val downloaded = File(context.noBackupFilesDir, DOWNLOADED_NAME)
+            val d = readInfo(downloaded)?.takeIf { it.schemaVersion == SCHEMA_VERSION } ?: return asset
+            val a = readInfo(asset) ?: return downloaded
+            val newer = d.feedEndDate > a.feedEndDate || (d.feedEndDate == a.feedEndDate && d.builtAt > a.builtAt)
+            return if (newer) downloaded else asset
+        }
+
+        /** Da chiamare fuori dal main thread: la prima volta copia ~23 MB. */
+        fun open(context: Context): GtfsStaticDb {
+            val file = chooseFile(context)
             val db = SQLiteDatabase.openDatabase(
                 file.path,
                 null,

@@ -3,8 +3,6 @@ package com.example.bustrack.gtfs
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
@@ -23,22 +21,27 @@ private const val TAG = "BusTrack"
 
 class TransitRepository(private val context: Context) {
 
-    private val openMutex = Mutex()
-    @Volatile private var staticDb: GtfsStaticDb? = null
     @Volatile private var parser: GtfsRealtimeParser? = null
+    @Volatile private var staticSeen: GtfsStaticDb? = null
 
-    suspend fun static(): GtfsStaticDb = staticDb ?: openMutex.withLock {
-        staticDb ?: withContext(Dispatchers.IO) {
-            GtfsStaticDb.open(context).also {
-                parser = GtfsRealtimeParser(it)
-                staticDb = it
+    /**
+     * Database statico condiviso da tutta l'app (vedi [GtfsStaticDb.shared]): dopo un aggiornamento
+     * automatico del GTFS si passa al nuovo alla prima richiesta successiva.
+     */
+    suspend fun static(): GtfsStaticDb = withContext(Dispatchers.IO) {
+        GtfsStaticDb.shared(context).also { db ->
+            if (db !== staticSeen) {
+                // Database cambiato: parser e cache legati al vecchio non valgono più.
+                staticSeen = db
+                parser = GtfsRealtimeParser(db)
+                allStopsCache = null
             }
         }
     }
 
     private suspend fun parser(): GtfsRealtimeParser {
-        static()
-        return parser!!
+        val db = static()
+        return parser?.takeIf { staticSeen === db } ?: GtfsRealtimeParser(db).also { parser = it }
     }
 
     suspend fun searchStops(query: String): List<Stop> =
@@ -102,7 +105,18 @@ class TransitRepository(private val context: Context) {
             val liveScheduled = liveArrivals.mapNotNull { a ->
                 a.delaySeconds?.let { Triple(a.routeId, a.headsign, a.time - it) }
             }
-            val scheduled = db.scheduledArrivals(stopId, nowEpochSeconds - 60, nowEpochSeconds + windowSeconds)
+            val allScheduled = db.scheduledArrivals(stopId, nowEpochSeconds - 60, nowEpochSeconds + windowSeconds)
+            // Gruppi di servizio realmente in servizio per le linee di questa fermata, dalle corse
+            // live di tutto il feed (non solo di questa fermata): servono a togliere gli orari fantasma.
+            val routesHere = allScheduled.mapNotNullTo(HashSet()) { it.routeId }
+            val liveTripsByRoute = snapshot.getOrNull()?.items.orEmpty()
+                .filter { it.routeId in routesHere }
+                .groupBy({ it.routeId!! }, { it.tripId })
+            val serviceOf = db.serviceIds(liveTripsByRoute.values.flatten())
+            val liveGroups = liveTripsByRoute.mapValues { (_, trips) ->
+                trips.mapNotNullTo(HashSet()) { serviceOf[it]?.let(::serviceGroup) }
+            }
+            val scheduled = dropUntrackedSchedules(allScheduled, liveGroups)
                 .filter { s ->
                     s.tripId !in liveTrips && liveScheduled.none { (route, headsign, time) ->
                         route == s.routeId && headsign == s.headsign && kotlin.math.abs(time - s.time) < 60

@@ -99,14 +99,22 @@ private const val ROUTE_OTHER_LAYER = "route-other"
 private const val ROUTE_CASING_LAYER = "route-casing"
 private const val ROUTE_ARROWS_LAYER = "route-arrows"
 private const val ROUTE_LINE_LAYER = "route-line"
+/** Varianti del percorso: tratteggiate, sotto il tracciato principale. */
+private const val ROUTE_VARIANT_LAYER = "route-variant"
 private const val STOPS_SOURCE = "stops"
 private const val STOP_CLUSTER_LAYER = "stops-cluster"
 private const val STOP_COUNT_LAYER = "stops-cluster-count"
 private const val STOP_POINT_LAYER = "stops-point"
 private const val STOP_LABEL_LAYER = "stops-label"
+/** Fermate vicine all'utente: sorgente a parte, non raggruppata, disegnata sopra le altre. */
+private const val STOPS_NEAR_SOURCE = "stops-near"
+private const val STOP_NEAR_LAYER = "stops-near-point"
+private const val STOP_NEAR_LABEL_LAYER = "stops-near-label"
 
 private val VEHICLE_LAYERS = listOf(CIRCLE_LAYER, ARROW_LAYER, LABEL_LAYER)
-private val STOP_LAYERS = listOf(STOP_CLUSTER_LAYER, STOP_COUNT_LAYER, STOP_POINT_LAYER, STOP_LABEL_LAYER)
+private val STOP_LAYERS = listOf(
+    STOP_CLUSTER_LAYER, STOP_COUNT_LAYER, STOP_POINT_LAYER, STOP_LABEL_LAYER, STOP_NEAR_LAYER, STOP_NEAR_LABEL_LAYER,
+)
 
 /**
  * Mappa con due livelli, alternativi tra loro:
@@ -128,6 +136,8 @@ fun VehicleMap(
     onOpenLine: (VehiclePosition) -> Unit,
     /** Capolinea per linea e direzione (chiave [terminusKey]): la freccia del pallino punta lì. */
     termini: Map<String, Stop>,
+    /** Fermate vicine all'utente (entro 1 km), evidenziate nel livello fermate. */
+    nearStopIds: Set<String>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -135,6 +145,7 @@ fun VehicleMap(
     val dotColor = LiveTheme.colors.live.toArgb()
     val stopColor = MaterialTheme.colorScheme.primary.toArgb()
     val onStopColor = MaterialTheme.colorScheme.onPrimary.toArgb()
+    val nearColor = MaterialTheme.colorScheme.tertiary.toArgb()
     var style by remember { mutableStateOf<Style?>(null) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedStopId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -182,7 +193,7 @@ fun VehicleMap(
             map.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
                 // Il tracciato sta sotto a tutto il resto (fermate e mezzi).
                 addRouteLayers(loaded, stopColor)
-                addStopLayers(loaded, stopColor, onStopColor)
+                addStopLayers(loaded, stopColor, onStopColor, nearColor)
                 loaded.addSource(GeoJsonSource(SOURCE_ID))
                 loaded.addLayer(
                     CircleLayer(CIRCLE_LAYER, SOURCE_ID).withProperties(
@@ -313,7 +324,8 @@ fun VehicleMap(
                         LineString.fromLngLats(shape.lat.indices.map { Point.fromLngLat(shape.lon[it], shape.lat[it]) })
                     ).apply {
                         addBooleanProperty("hl", chosen == null || isChosen)
-                        addBooleanProperty("arrows", isChosen)
+                        addBooleanProperty("variant", !shape.main)
+                        addBooleanProperty("arrows", isChosen && shape.main)
                     }
                 }
             )
@@ -322,7 +334,7 @@ fun VehicleMap(
         if (lineShapes.isNotEmpty() && !inPreview && memory.fittedLineKey != key) {
             memory.fittedLineKey = key
             // Con una direzione scelta ci si inquadra su quella.
-            val fitShapes = lineShapes.filter { chosen == null || it.directionId == chosen }
+            val fitShapes = lineShapes.filter { it.main && (chosen == null || it.directionId == chosen) }
             val bounds = LatLngBounds.Builder().apply {
                 fitShapes.forEach { s -> s.lat.indices.forEach { include(LatLng(s.lat[it], s.lon[it])) } }
             }.build()
@@ -337,23 +349,25 @@ fun VehicleMap(
     }
 
     // Fermate: costruisce i punti fuori dal thread principale (sono migliaia) e solo se servono.
-    LaunchedEffect(style, stops, visibleStopIds, showStops) {
+    LaunchedEffect(style, stops, visibleStopIds, showStops, nearStopIds) {
         val source = style?.getSourceAs<GeoJsonSource>(STOPS_SOURCE) ?: return@LaunchedEffect
+        val nearSource = style?.getSourceAs<GeoJsonSource>(STOPS_NEAR_SOURCE) ?: return@LaunchedEffect
         if (!showStops) return@LaunchedEffect
-        val collection = withContext(Dispatchers.Default) {
-            FeatureCollection.fromFeatures(
-                stops.asSequence()
-                    .filter { visibleStopIds == null || it.id in visibleStopIds }
-                    .map { s ->
-                        Feature.fromGeometry(Point.fromLngLat(s.lon, s.lat)).apply {
-                            addStringProperty("id", s.id)
-                            addStringProperty("name", s.name)
-                        }
-                    }
-                    .toList()
-            )
+        // Le fermate vicine vanno nella loro sorgente (mai raggruppate), le altre in quella a gruppi.
+        val (near, others) = withContext(Dispatchers.Default) {
+            val feature = { s: Stop ->
+                Feature.fromGeometry(Point.fromLngLat(s.lon, s.lat)).apply {
+                    addStringProperty("id", s.id)
+                    addStringProperty("name", s.name)
+                }
+            }
+            val (n, o) = stops.asSequence()
+                .filter { visibleStopIds == null || it.id in visibleStopIds }
+                .partition { it.id in nearStopIds }
+            FeatureCollection.fromFeatures(n.map(feature)) to FeatureCollection.fromFeatures(o.map(feature))
         }
-        source.setGeoJson(collection)
+        source.setGeoJson(others)
+        nearSource.setGeoJson(near)
     }
 
     // Ciclo di vita della mappa: segue quello dell'app, ma solo finché la scheda Mappa è sullo
@@ -423,7 +437,11 @@ fun VehicleMap(
 private fun addRouteLayers(style: Style, color: Int) {
     style.addSource(GeoJsonSource(ROUTE_SOURCE))
     val white = android.graphics.Color.WHITE
-    val highlighted = Expression.eq(Expression.get("hl"), Expression.literal(true))
+    val isVariant = Expression.eq(Expression.get("variant"), Expression.literal(true))
+    val highlightedOnly = Expression.eq(Expression.get("hl"), Expression.literal(true))
+    // I livelli pieni disegnano solo i tracciati principali; le varianti hanno il loro livello.
+    val highlighted = Expression.all(highlightedOnly, Expression.not(isVariant))
+    val dimmed = Expression.all(Expression.not(highlightedOnly), Expression.not(isVariant))
     val width = Expression.interpolate(
         Expression.linear(), Expression.zoom(),
         Expression.stop(10, 3f), Expression.stop(14, 5.5f), Expression.stop(18, 9f),
@@ -433,7 +451,19 @@ private fun addRouteLayers(style: Style, color: Int) {
         Expression.stop(10, 2f), Expression.stop(14, 3.5f), Expression.stop(18, 6f),
     )
     style.addLayer(
-        LineLayer(ROUTE_OTHER_LAYER, ROUTE_SOURCE).withFilter(Expression.not(highlighted)).withProperties(
+        LineLayer(ROUTE_VARIANT_LAYER, ROUTE_SOURCE).withFilter(isVariant).withProperties(
+            PropertyFactory.lineColor(color),
+            PropertyFactory.lineWidth(thinWidth),
+            // Varianti della direzione evidenziata ben visibili, quelle dell'altra appena accennate.
+            PropertyFactory.lineOpacity(
+                Expression.switchCase(highlightedOnly, Expression.literal(0.75f), Expression.literal(0.25f))
+            ),
+            PropertyFactory.lineDasharray(arrayOf(1.5f, 1.5f)),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
+    style.addLayer(
+        LineLayer(ROUTE_OTHER_LAYER, ROUTE_SOURCE).withFilter(dimmed).withProperties(
             PropertyFactory.lineColor(color),
             PropertyFactory.lineWidth(thinWidth),
             PropertyFactory.lineOpacity(0.4f),
@@ -487,7 +517,7 @@ private fun addRouteLayers(style: Style, color: Int) {
  * Livello fermate: sorgente con raggruppamento nativo di MapLibre (cluster), cerchi con il numero
  * per i gruppi, punti per le singole fermate e il nome da zoom 15. Parte nascosto.
  */
-private fun addStopLayers(style: Style, color: Int, onColor: Int) {
+private fun addStopLayers(style: Style, color: Int, onColor: Int, nearColor: Int) {
     val white = android.graphics.Color.WHITE
     style.addSource(
         GeoJsonSource(
@@ -551,6 +581,38 @@ private fun addStopLayers(style: Style, color: Int, onColor: Int) {
     )
     labels.minZoom = 15f
     style.addLayer(labels)
+
+    // Fermate vicine all'utente: pallino più grande con anello colorato e nome visibile prima.
+    style.addSource(GeoJsonSource(STOPS_NEAR_SOURCE))
+    style.addLayer(
+        CircleLayer(STOP_NEAR_LAYER, STOPS_NEAR_SOURCE).withProperties(
+            PropertyFactory.circleColor(color),
+            PropertyFactory.circleStrokeColor(nearColor),
+            PropertyFactory.circleStrokeWidth(3f),
+            PropertyFactory.circleRadius(
+                Expression.interpolate(
+                    Expression.linear(), Expression.zoom(),
+                    Expression.stop(12, 5.5f), Expression.stop(16, 8f), Expression.stop(18, 10f),
+                )
+            ),
+            PropertyFactory.visibility(Property.NONE),
+        )
+    )
+    val nearLabels = SymbolLayer(STOP_NEAR_LABEL_LAYER, STOPS_NEAR_SOURCE).withProperties(
+        PropertyFactory.textField(Expression.get("name")),
+        PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+        PropertyFactory.textSize(11f),
+        PropertyFactory.textOffset(arrayOf(0f, 1.3f)),
+        PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
+        PropertyFactory.textMaxWidth(8f),
+        PropertyFactory.textColor(nearColor),
+        PropertyFactory.textHaloColor(white),
+        PropertyFactory.textHaloWidth(1.5f),
+        PropertyFactory.textAllowOverlap(false),
+        PropertyFactory.visibility(Property.NONE),
+    )
+    nearLabels.minZoom = 14f
+    style.addLayer(nearLabels)
 }
 
 @Composable
@@ -614,7 +676,9 @@ private fun MapLibreMap.vehicleAt(latLng: LatLng): String? {
 private fun MapLibreMap.stopFeatureAt(latLng: LatLng): Feature? {
     val p = projection.toScreenLocation(latLng)
     val r = 28f
-    return queryRenderedFeatures(RectF(p.x - r, p.y - r, p.x + r, p.y + r), STOP_CLUSTER_LAYER, STOP_POINT_LAYER)
+    return queryRenderedFeatures(
+        RectF(p.x - r, p.y - r, p.x + r, p.y + r), STOP_NEAR_LAYER, STOP_CLUSTER_LAYER, STOP_POINT_LAYER,
+    )
         .firstOrNull()
 }
 

@@ -238,6 +238,10 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     /** Tracciati della linea filtrata, uno per direzione (vuoto se nessuna linea corrisponde). */
     val mapLineShapes: StateFlow<List<com.example.bustrack.gtfs.RouteShape>> = _mapLineShapes
 
+    private val _mapLinePatterns = MutableStateFlow<List<RoutePattern>>(emptyList())
+    /** Direzioni della linea filtrata sulla mappa (vuoto se nessuna linea corrisponde). */
+    val mapLinePatterns: StateFlow<List<RoutePattern>> = _mapLinePatterns
+
     private var mapStopsLoading = false
     private var mapFilterJob: Job? = null
 
@@ -256,10 +260,15 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun setMapLineFilter(line: String) {
         mapFilterJob?.cancel()
-        if (line.isBlank()) { _mapStopIds.value = null; _mapLineShapes.value = emptyList(); return }
+        if (line.isBlank()) {
+            _mapStopIds.value = null; _mapLineShapes.value = emptyList(); _mapLinePatterns.value = emptyList(); return
+        }
         mapFilterJob = viewModelScope.launch {
             _mapStopIds.value = runCatching { repo.stopIdsForLine(line) }.getOrDefault(emptySet())
             _mapLineShapes.value = runCatching { repo.routeShapes(line) }.getOrDefault(emptyList())
+            val route = runCatching { repo.searchRoutes(line) }.getOrDefault(emptyList())
+                .firstOrNull { it.label.equals(line.trim(), ignoreCase = true) }
+            _mapLinePatterns.value = route?.let { runCatching { repo.routePatterns(it.id) }.getOrNull() }.orEmpty()
         }
     }
 
@@ -550,6 +559,16 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         // I capolinea arrivano subito dopo: i pallini si vedono intanto, le frecce poco dopo.
         // Lavoro separato: chi attende questo aggiornamento (il ciclo della mappa) non aspetta anche i capolinea.
         if (result is Load.Ready) viewModelScope.launch { loadTermini(result.value) }
+    }
+
+    /**
+     * Avvisi per le pagine di linea e fermata: li carica se mancano o hanno più di 5 minuti
+     * (la scheda Avvisi, quando è aperta, li tiene aggiornati da sé).
+     */
+    fun ensureAlerts() {
+        val current = _alerts.value
+        val stale = current !is Load.Ready || SystemClock.elapsedRealtime() - current.fetchedAtElapsed > 300_000
+        if (stale && current !is Load.Loading) refreshAlerts()
     }
 
     fun refreshAlerts(manual: Boolean = false) = viewModelScope.launch {

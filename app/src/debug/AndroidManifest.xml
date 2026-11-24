@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Solo debug: aggiornamento GTFS forzato da adb (vedi DebugGtfsUpdateReceiver). -->
+        <receiver
+            android:name=".DebugGtfsUpdateReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.bustrack.DEBUG_UPDATE_GTFS" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
