@@ -293,6 +293,15 @@ fun VehicleMap(
     }
 
     // Un solo livello alla volta: mostra quello scelto e nasconde l'altro; chiude le schede aperte.
+    // Ritorno alla mappa generale dalla barra in basso: si chiudono le schede di fermata o mezzo.
+    val resetCount = memory.mapResetCount
+    var seenReset by remember { mutableStateOf(resetCount) }
+    if (resetCount != seenReset) {
+        seenReset = resetCount
+        selectedId = null
+        selectedStopId = null
+    }
+
     LaunchedEffect(style, showStops) {
         val loaded = style ?: return@LaunchedEffect
         val vehicleVisibility = PropertyFactory.visibility(if (showStops) Property.NONE else Property.VISIBLE)

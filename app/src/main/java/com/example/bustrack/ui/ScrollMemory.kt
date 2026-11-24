@@ -51,6 +51,20 @@ class ScrollMemory {
     /** Scheda Mappa: false = si vedono i bus, true = si vedono le fermate. */
     var mapShowStops by mutableStateOf(false)
     var vehiclesFilter by mutableStateOf("")
+
+    /** Cresce a ogni ritorno alla mappa generale: la mappa chiude le schede aperte. */
+    var mapResetCount by mutableStateOf(0)
+        private set
+
+    /** Mappa generale: tutti i bus, senza filtro né direzione, schede chiuse (inquadratura invariata). */
+    fun resetMap() {
+        vehiclesFilter = ""
+        mapLineChoice = null
+        fittedLineKey = null
+        mapShowStops = false
+        vehiclesShowMap = true
+        mapResetCount++
+    }
 }
 
 /** Linea e direzione (con capolinea) scelte nella schermata della linea e mostrate sulla mappa. */
