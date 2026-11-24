@@ -808,16 +808,46 @@ private fun AlertsScreen(vm: TransitViewModel) {
             RefreshButton(TransitViewModel.REFRESH_ALERTS in refreshing) { vm.refreshAlerts(manual = true) }
         }
         val favorites by vm.favorites.collectAsStateWithLifecycle()
+        // Ricerca per linea: si vedono solo gli avvisi di quella linea (o, da 3 caratteri, col testo cercato).
+        val memory = LocalScrollMemory.current
+        var query by memory::alertsQuery
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Cerca una linea") },
+            singleLine = true,
+            shape = CardCorner,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
+        )
         LoadContent(state, empty = "Nessun avviso attivo") { alerts ->
-            // In cima gli avvisi che riguardano linee o fermate preferite.
+            val q = query.trim()
+            val found = if (q.isEmpty()) alerts else alerts.filter { it.matchesSearch(q) }
+            // In cima gli avvisi che riguardano linee o fermate preferite (solo senza ricerca).
             val favLabels = favorites.lines.mapTo(HashSet()) { it.route.label }
             val favStops = favorites.stops.mapTo(HashSet()) { it.id }
-            val (mine, others) = alerts.partition { it.concerns(favLabels, favStops) }
+            val (mine, others) = if (q.isEmpty()) found.partition { it.concerns(favLabels, favStops) } else emptyList<ServiceAlert>() to found
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                state = LocalScrollMemory.current.list("alerts"),
+                // Ogni ricerca riparte dall'alto.
+                state = memory.list(if (q.isEmpty()) "alerts" else "alerts-search"),
                 contentPadding = PaddingValues(bottom = LocalBottomBarInset.current),
             ) {
+                if (q.isNotEmpty()) {
+                    item(key = "search-result") {
+                        val isLine = found.any { a -> a.routeLabels.any { it.equals(q, ignoreCase = true) } } ||
+                            q.length < 3
+                        Text(
+                            when {
+                                found.isEmpty() && isLine -> "Nessun avviso attivo per la linea $q"
+                                found.isEmpty() -> "Nessun avviso attivo per \"$q\""
+                                isLine -> (if (found.size == 1) "1 avviso" else "${found.size} avvisi") + " per la linea $q"
+                                else -> (if (found.size == 1) "1 avviso" else "${found.size} avvisi") + " con \"$q\""
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (mine.isNotEmpty()) {
                     item(key = "title-mine") { SectionTitle("Per i tuoi preferiti") }
                     items(mine, key = { "mine-" + it.id }) { AlertCard(it) }

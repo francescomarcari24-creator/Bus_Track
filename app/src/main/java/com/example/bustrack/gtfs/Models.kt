@@ -133,6 +133,17 @@ data class ServiceAlert(
     fun concerns(routeLabels: Collection<String>, stopIds: Collection<String>): Boolean =
         routeLabels.any { it in this.routeLabels } || stopIds.any { it in this.stopIds }
 
+    /**
+     * Ricerca nella scheda Avvisi: numero di linea esatto (senza maiuscole/minuscole, così "6" non
+     * trova il 64); da 3 caratteri anche nel titolo e nel testo (es. una via o una fermata).
+     */
+    fun matchesSearch(query: String): Boolean {
+        val q = query.trim()
+        if (q.isEmpty()) return true
+        if (routeLabels.any { it.equals(q, ignoreCase = true) }) return true
+        return q.length >= 3 && (header.contains(q, ignoreCase = true) || description?.contains(q, ignoreCase = true) == true)
+    }
+
     fun isActiveAt(epochSeconds: Long): Boolean =
         activePeriods.isEmpty() || activePeriods.any { (start, end) ->
             (start == null || epochSeconds >= start) && (end == null || epochSeconds <= end)

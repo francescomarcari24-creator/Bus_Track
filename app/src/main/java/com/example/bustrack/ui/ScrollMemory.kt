@@ -52,6 +52,9 @@ class ScrollMemory {
     var mapShowStops by mutableStateOf(false)
     var vehiclesFilter by mutableStateOf("")
 
+    /** Scheda Avvisi: ricerca per linea (o testo). */
+    var alertsQuery by mutableStateOf("")
+
     /** Cresce a ogni ritorno alla mappa generale: la mappa chiude le schede aperte. */
     var mapResetCount by mutableStateOf(0)
         private set

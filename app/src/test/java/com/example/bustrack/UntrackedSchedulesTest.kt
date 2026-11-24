@@ -38,3 +38,26 @@ class UntrackedSchedulesTest {
         assertEquals(list, dropUntrackedSchedules(list, mapOf("8" to emptySet())))
     }
 }
+
+class AlertSearchTest {
+    private val alert = com.example.bustrack.gtfs.ServiceAlert(
+        id = "1", header = "Deviazione in via Nazionale", description = "Per lavori il 64 non ferma a Termini",
+        routeLabels = listOf("64", "C2"), stopIds = emptyList(), activePeriods = emptyList(),
+    )
+
+    @Test
+    fun matchesLineNumberExactly() {
+        assertEquals(true, alert.matchesSearch("64"))
+        assertEquals(true, alert.matchesSearch("c2"))
+        assertEquals(false, alert.matchesSearch("6"))
+        assertEquals(true, alert.matchesSearch(" "))
+    }
+
+    @Test
+    fun matchesTextFromThreeCharacters() {
+        assertEquals(true, alert.matchesSearch("nazionale"))
+        assertEquals(true, alert.matchesSearch("Termini"))
+        assertEquals(false, alert.matchesSearch("Te"))
+        assertEquals(false, alert.matchesSearch("Ostiense"))
+    }
+}
