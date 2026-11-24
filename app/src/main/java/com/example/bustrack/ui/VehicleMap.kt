@@ -85,6 +85,10 @@ import java.time.Instant
  * pensato anche per l'uso da app. Attribuzione mostrata da MapLibre.
  */
 private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+/** Stile scuro di OpenFreeMap, usato col tema scuro del telefono (stessi caratteri di "liberty"). */
+private const val STYLE_URL_DARK = "https://tiles.openfreemap.org/styles/dark"
+/** Alone di testi e bordi con la mappa scura (con quella chiara è bianco). */
+private const val DARK_HALO = 0xFF121212.toInt()
 private val ROME_CENTER = LatLng(41.9028, 12.4964)
 private const val SOURCE_ID = "vehicles"
 private const val CIRCLE_LAYER = "vehicles-circle"
@@ -146,6 +150,10 @@ fun VehicleMap(
     val stopColor = MaterialTheme.colorScheme.primary.toArgb()
     val onStopColor = MaterialTheme.colorScheme.onPrimary.toArgb()
     val nearColor = MaterialTheme.colorScheme.tertiary.toArgb()
+    // Mappa scura col tema scuro: di sera una mappa chiara abbaglia. Gli aloni dei testi e il
+    // bordo del tracciato seguono lo sfondo (bianchi sulla chiara, quasi neri sulla scura).
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    val halo = if (dark) DARK_HALO else android.graphics.Color.WHITE
     var style by remember { mutableStateOf<Style?>(null) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedStopId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -190,48 +198,6 @@ fun VehicleMap(
             val logoPx = (8 * context.resources.displayMetrics.density).toInt()
             map.uiSettings.setLogoMargins(logoPx, 0, 0, bottomPx)
             map.uiSettings.setAttributionMargins(logoPx * 12, 0, 0, bottomPx)
-            map.setStyle(Style.Builder().fromUri(STYLE_URL)) { loaded ->
-                // Il tracciato sta sotto a tutto il resto (fermate e mezzi).
-                addRouteLayers(loaded, stopColor)
-                addStopLayers(loaded, stopColor, onStopColor, nearColor)
-                loaded.addSource(GeoJsonSource(SOURCE_ID))
-                loaded.addLayer(
-                    CircleLayer(CIRCLE_LAYER, SOURCE_ID).withProperties(
-                        // Abbastanza grande da contenere la freccia del capolinea.
-                        PropertyFactory.circleRadius(7f),
-                        PropertyFactory.circleColor(dotColor),
-                        PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-                        PropertyFactory.circleStrokeWidth(2f),
-                    )
-                )
-                // Freccia bianca nel pallino, ruotata verso il capolinea (proprietà "bearing", in gradi).
-                loaded.addImage(ARROW_IMAGE, arrowBitmap(context.resources.displayMetrics.density))
-                loaded.addLayer(
-                    SymbolLayer(ARROW_LAYER, SOURCE_ID)
-                        .withFilter(Expression.has("bearing"))
-                        .withProperties(
-                            PropertyFactory.iconImage(ARROW_IMAGE),
-                            PropertyFactory.iconRotate(Expression.get("bearing")),
-                            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-                            PropertyFactory.iconAllowOverlap(true),
-                            PropertyFactory.iconIgnorePlacement(true),
-                        )
-                )
-                loaded.addLayer(
-                    SymbolLayer(LABEL_LAYER, SOURCE_ID).withProperties(
-                        PropertyFactory.textField(Expression.get("label")),
-                        PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
-                        PropertyFactory.textSize(12f),
-                        PropertyFactory.textOffset(arrayOf(0f, -1.4f)),
-                        PropertyFactory.textColor(dotColor),
-                        PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
-                        PropertyFactory.textHaloWidth(2f),
-                        // Le etichette sovrapposte vengono nascoste: zoomando ricompaiono.
-                        PropertyFactory.textAllowOverlap(false),
-                    )
-                )
-                style = loaded
-            }
             mapRef = map
             // Toccando o trascinando la mappa si smette di seguire la posizione (lo fa MapLibre).
             map.locationComponent.addOnCameraTrackingChangedListener(object : OnCameraTrackingChangedListener {
@@ -262,6 +228,55 @@ fun VehicleMap(
                 }
                 true
             }
+        }
+    }
+
+    // Stile della mappa (chiaro o scuro secondo il tema) e livelli dell'app sopra di esso.
+    // Cambiando stile i livelli vanno ricreati: gli effetti che dipendono da `style` ripopolano i dati.
+    LaunchedEffect(mapRef, dark) {
+        val map = mapRef ?: return@LaunchedEffect
+        style = null
+        map.setStyle(Style.Builder().fromUri(if (dark) STYLE_URL_DARK else STYLE_URL)) { loaded ->
+            // Il tracciato sta sotto a tutto il resto (fermate e mezzi).
+            addRouteLayers(loaded, stopColor, halo)
+            addStopLayers(loaded, stopColor, onStopColor, nearColor, halo)
+            loaded.addSource(GeoJsonSource(SOURCE_ID))
+            loaded.addLayer(
+                CircleLayer(CIRCLE_LAYER, SOURCE_ID).withProperties(
+                    // Abbastanza grande da contenere la freccia del capolinea.
+                    PropertyFactory.circleRadius(7f),
+                    PropertyFactory.circleColor(dotColor),
+                    PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                    PropertyFactory.circleStrokeWidth(2f),
+                )
+            )
+            // Freccia bianca nel pallino, ruotata verso il capolinea (proprietà "bearing", in gradi).
+            loaded.addImage(ARROW_IMAGE, arrowBitmap(context.resources.displayMetrics.density))
+            loaded.addLayer(
+                SymbolLayer(ARROW_LAYER, SOURCE_ID)
+                    .withFilter(Expression.has("bearing"))
+                    .withProperties(
+                        PropertyFactory.iconImage(ARROW_IMAGE),
+                        PropertyFactory.iconRotate(Expression.get("bearing")),
+                        PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                        PropertyFactory.iconAllowOverlap(true),
+                        PropertyFactory.iconIgnorePlacement(true),
+                    )
+            )
+            loaded.addLayer(
+                SymbolLayer(LABEL_LAYER, SOURCE_ID).withProperties(
+                    PropertyFactory.textField(Expression.get("label")),
+                    PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+                    PropertyFactory.textSize(12f),
+                    PropertyFactory.textOffset(arrayOf(0f, -1.4f)),
+                    PropertyFactory.textColor(dotColor),
+                    PropertyFactory.textHaloColor(halo),
+                    PropertyFactory.textHaloWidth(2f),
+                    // Le etichette sovrapposte vengono nascoste: zoomando ricompaiono.
+                    PropertyFactory.textAllowOverlap(false),
+                )
+            )
+            style = loaded
         }
     }
 
@@ -434,9 +449,9 @@ fun VehicleMap(
  * - altra direzione: linea sottile e attenuata, senza bordo.
  * Colore tema (dato statico, non verde).
  */
-private fun addRouteLayers(style: Style, color: Int) {
+private fun addRouteLayers(style: Style, color: Int, halo: Int) {
     style.addSource(GeoJsonSource(ROUTE_SOURCE))
-    val white = android.graphics.Color.WHITE
+    val white = halo
     val isVariant = Expression.eq(Expression.get("variant"), Expression.literal(true))
     val highlightedOnly = Expression.eq(Expression.get("hl"), Expression.literal(true))
     // I livelli pieni disegnano solo i tracciati principali; le varianti hanno il loro livello.
@@ -499,7 +514,8 @@ private fun addRouteLayers(style: Style, color: Int) {
                 PropertyFactory.textField(">"),
                 PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
                 PropertyFactory.textSize(20f),
-                PropertyFactory.textColor(white),
+                // Frecce sempre bianche sul colore della linea, anche con la mappa scura.
+                PropertyFactory.textColor(android.graphics.Color.WHITE),
                 PropertyFactory.textHaloColor(color),
                 PropertyFactory.textHaloWidth(1.6f),
                 // Permette di seguire anche le curve strette (default 45°) e toglie il margine di collisione.
@@ -517,8 +533,8 @@ private fun addRouteLayers(style: Style, color: Int) {
  * Livello fermate: sorgente con raggruppamento nativo di MapLibre (cluster), cerchi con il numero
  * per i gruppi, punti per le singole fermate e il nome da zoom 15. Parte nascosto.
  */
-private fun addStopLayers(style: Style, color: Int, onColor: Int, nearColor: Int) {
-    val white = android.graphics.Color.WHITE
+private fun addStopLayers(style: Style, color: Int, onColor: Int, nearColor: Int, halo: Int) {
+    val white = halo
     style.addSource(
         GeoJsonSource(
             STOPS_SOURCE,

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Bus Track</string>
+    <string name="stop_widget_name">Prossimi passaggi</string>
+    <string name="stop_widget_description">Prossimi passaggi a una fermata preferita</string>
 </resources>

@@ -162,6 +162,14 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     val stopsState by vm.stops.collectAsStateWithLifecycle()
     val lineFromMapId = stopsState.line?.openId?.takeIf { stopsState.lineFromMap }
     LaunchedEffect(lineFromMapId) { if (lineFromMapId != null) openTab(0) }
+    // Fermata chiesta da fuori (tocco sul widget): si apre nella scheda Home.
+    val pendingStop by com.example.bustrack.PendingStopOpen.stopId.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingStop) {
+        val id = pendingStop ?: return@LaunchedEffect
+        com.example.bustrack.PendingStopOpen.stopId.value = null
+        vm.openStopById(id)
+        openTab(0)
+    }
     // Popup della direzione: sta qui, fuori dalle schede, perché deve comparire sopra qualunque
     // scheda (dentro la Home verrebbe soppresso quando la Home non è visibile, es. dalla mappa).
     stopsState.directionChoice?.let { choice ->

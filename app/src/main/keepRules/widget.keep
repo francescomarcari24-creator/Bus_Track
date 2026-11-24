@@ -1,0 +1,3 @@
+# Widget: Glance istanzia le ActionCallback per nome (tasto ↻ del widget), quindi vanno conservate
+# con il costruttore senza argomenti.
+-keep class * implements androidx.glance.appwidget.action.ActionCallback { <init>(); }

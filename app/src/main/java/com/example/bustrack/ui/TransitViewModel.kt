@@ -480,6 +480,15 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Apre gli arrivi di una fermata dalla Home (es. toccando il widget). */
+    fun openStopById(stopId: String) {
+        viewModelScope.launch {
+            val stop = runCatching { repo.stopsInOrder(listOf(stopId)) }.getOrNull()?.firstOrNull() ?: return@launch
+            goToStopsHome()
+            selectStop(stop)
+        }
+    }
+
     /** Apre la fermata dalla mappa: con indietro si torna alla mappa (con il suo tracciato). */
     fun openStopFromMap(stop: Stop) {
         goToStopsHome()
