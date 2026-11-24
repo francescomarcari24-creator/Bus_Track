@@ -41,9 +41,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -541,19 +538,16 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     // Le fermate si vedono sempre sulla mappa; l'elenco esiste solo per i bus.
     val mapVisible = showStops || showMap
     Column(Modifier.fillMaxSize()) {
-        // Slider a due posizioni: bus (live) / fermate (statiche).
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
-            SegmentedButton(
-                selected = !showStops,
-                onClick = { showStops = false },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-            ) { Text("Bus") }
-            SegmentedButton(
-                selected = showStops,
-                onClick = { showStops = true },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-            ) { Text("Fermate") }
-        }
+        // Pillola a due posizioni, bus (live) / fermate (statiche): stesso aspetto e comportamento
+        // della barra in basso e di "Preferiti / Vicine" (tocco o trascinamento dell'indicatore).
+        // La mappa sotto è una sola: cambia solo il livello mostrato, niente scorrimento laterale.
+        PillSwitch(
+            labels = listOf("Bus", "Fermate"),
+            selected = if (showStops) 1 else 0,
+            onSelect = { showStops = it == 1 },
+            position = rememberTabPosition(if (showStops) 1 else 0),
+            modifier = Modifier.padding(top = 12.dp),
+        )
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
