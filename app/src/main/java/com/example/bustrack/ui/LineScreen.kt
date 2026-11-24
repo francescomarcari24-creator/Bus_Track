@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,7 +60,7 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
             // Riquadro con gli stessi angoli arrotondati del resto dell'app.
             Column(Modifier.clip(CardCorner)) {
                 choice.patterns.forEach { pattern ->
-                    ListItem(
+                    AppListItem(
                         supportingContent = pattern.fromStopName?.let { from -> { Text("da $from · ${pattern.stopIds.size} fermate") } },
                         modifier = Modifier.clickable { onPick(pattern) },
                     ) {

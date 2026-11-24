@@ -27,7 +27,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -327,7 +326,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 if (state.routeResults.isNotEmpty()) {
                     item { SectionTitle("Linee") }
                     items(state.routeResults, key = { "route-" + it.id }) { route ->
-                        ListItem(
+                        AppListItem(
                             leadingContent = { RouteBadge(route.label) },
                             supportingContent = {
                                 Text(listOfNotNull(route.longName, route.agencyName).joinToString(" · "))
@@ -338,7 +337,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     if (state.results.isNotEmpty()) item { SectionTitle("Fermate") }
                 }
                 items(state.results, key = { it.id }) { stop ->
-                    ListItem(
+                    AppListItem(
                         supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
                         modifier = Modifier.clickable { vm.selectStop(stop) },
                     ) { Text(stop.name) }
@@ -352,7 +351,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
 private fun ArrivalRow(a: Arrival, onClick: () -> Unit) {
     val now = System.currentTimeMillis() / 1000
     val minutes = ((a.time - now) / 60).coerceAtLeast(0)
-    ListItem(
+    AppListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { RouteBadge(a.routeLabel, live = a.isRealtime) },
         supportingContent = {
@@ -514,7 +513,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
 
 @Composable
 private fun VehicleRow(v: VehiclePosition) {
-    ListItem(
+    AppListItem(
         leadingContent = { RouteBadge(v.routeLabel, live = true) },
         supportingContent = {
             Text(
@@ -592,7 +591,7 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
     if (favorites.lines.isNotEmpty()) {
         item { SectionTitle("Linee preferite") }
         items(favorites.lines, key = { "fav-line-${it.route.id}-${it.pattern.directionId}" }) { fav ->
-            ListItem(
+            AppListItem(
                 leadingContent = { RouteBadge(fav.route.label) },
                 supportingContent = fav.pattern.fromStopName?.let { from -> { Text("da $from") } },
                 modifier = Modifier.clickable { vm.openFavoriteLine(fav) },
@@ -602,7 +601,7 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
     if (favorites.stops.isNotEmpty()) {
         item { SectionTitle("Fermate preferite") }
         items(favorites.stops, key = { "fav-stop-" + it.id }) { stop ->
-            ListItem(
+            AppListItem(
                 supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
                 modifier = Modifier.clickable { vm.selectStop(stop) },
             ) { Text(stop.name) }
