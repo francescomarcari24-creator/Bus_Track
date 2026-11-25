@@ -193,7 +193,12 @@ fun <T : Any> PageStack(
                                     alpha = 1f
                                     if (entering) translationX = -0.2f * size.width * enterProgress()
                                 }
-                                else -> alpha = 0f
+                                // Fuori schermo, non solo trasparente: così non riceve i tocchi caduti su
+                                // zone vuote della pagina sopra.
+                                else -> {
+                                    alpha = 0f
+                                    translationX = 3f * size.width
+                                }
                             }
                         }
                         .background(background)

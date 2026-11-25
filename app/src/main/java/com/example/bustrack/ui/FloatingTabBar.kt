@@ -153,7 +153,9 @@ fun TabPager(
                                 translationX = when (i) {
                                     current -> -v * size.width
                                     from -> (jumpSign - v) * size.width
-                                    else -> 0f
+                                    // Fuori schermo, non solo trasparente: una scheda trasparente sopra la
+                                    // Home ne intercettava i tocchi (pillola che non rispondeva).
+                                    else -> 3f * size.width
                                 }
                                 alpha = if (i == current || i == from) 1f else 0f
                             } else {

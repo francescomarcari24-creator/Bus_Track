@@ -22,6 +22,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -485,6 +486,19 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
             val showRecents = (searchFocused || recentsPinned) && state.query.isBlank() && recents.isNotEmpty() && !inPreview
             val closeRecents = { recentsPinned = false; focusManager.clearFocus() }
+            // Tastiera chiusa (gesto indietro o suo tasto) col campo ancora selezionato: si chiude anche
+            // il pannello. Non se si sta aprendo la finestra della direzione (lì il pannello si chiude
+            // a finestra aperta, vedi DialogOrigin).
+            val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+            var imeWasVisible by remember { mutableStateOf(false) }
+            LaunchedEffect(imeVisible) {
+                if (imeVisible) {
+                    imeWasVisible = true
+                } else if (imeWasVisible) {
+                    imeWasVisible = false
+                    if (searchFocused && !recentsPinned && vm.stops.value.directionChoice == null) closeRecents()
+                }
+            }
             // Indietro con la tastiera/pannello aperti: si chiudono, senza lasciare la pagina.
             androidx.activity.compose.BackHandler(enabled = (searchFocused || recentsPinned) && !inPreview) { closeRecents() }
             OutlinedTextField(
@@ -504,7 +518,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     homePosition,
                     count = 2,
                     gap = 16.dp,
-                    modifier = Modifier.fillMaxSize().padding(top = 12.dp),
+                    // Stessa distanza (12 dp) dalla barra di ricerca sopra e dal fondo dello schermo sotto.
+                    modifier = Modifier.fillMaxSize().padding(top = 12.dp, bottom = HomePanelGap),
                 ) { pane ->
                     // Riquadro leggero per ciascun elenco: scorrendo si distinguono le due sezioni.
                     // Arriva fino al bordo in basso (la lista scorre sotto la barra), quindi angoli
@@ -516,8 +531,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                         // rettangolo e i margini interni tengono il contenuto lontano dagli angoli.
                         Modifier
                             .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow, PanelShape)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), PanelShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow, CardCorner)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CardCorner)
                     ) {
                         // Le righe prendono lo sfondo del riquadro (niente riquadro per ogni riga).
                         CompositionLocalProvider(LocalTransparentListItems provides true) {
@@ -528,7 +543,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                                     start = 8.dp,
                                     end = 8.dp,
                                     top = 4.dp,
-                                    bottom = LocalBottomBarInset.current,
+                                    // L'ultima voce si ferma sopra la barra flottante (il riquadro finisce già 12 dp più su).
+                                    bottom = (LocalBottomBarInset.current - HomePanelGap).coerceAtLeast(0.dp),
                                 ),
                                 modifier = Modifier.fillMaxSize(),
                             ) {
@@ -621,7 +637,9 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     recentStore.add(item)
                     vm.openRouteById(item.id)
                 },
-                onClose = { focusManager.clearFocus() },
+                // A finestra aperta il pannello si chiude, anche se era tenuto aperto senza tastiera
+                // (dopo aver chiuso una finestra precedente): prima restava aperto la seconda volta.
+                onClose = { closeRecents() },
                 onReturn = {
                     // Chiudendo la finestra della direzione: il pannello riscende (senza tastiera, così
                     // la riga torna dov'era) e, a discesa finita, la finestra rientra nella riga.
@@ -1203,6 +1221,9 @@ private fun WatchDialog(arrival: Arrival, onPick: (Int) -> Unit, onDismiss: () -
  * "Vicine" nella Home e la mappa. Angoli della CardCorner (28 dp) solo in alto.
  */
 internal val PanelShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+/** Distanza dei riquadri Preferiti/Vicine dalla barra di ricerca e dal fondo dello schermo. */
+private val HomePanelGap = 12.dp
 
 /** Fermate vicine nella schermata iniziale (mostrate quando la ricerca è vuota). */
 private fun LazyListScope.nearbySection(

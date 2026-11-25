@@ -145,8 +145,9 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
             // Bordi finali della finestra, misurati senza trasformazioni (servono per partire dalla riga).
             var finalBounds by remember { mutableStateOf<Rect?>(null) }
             Box(
+                // Larga quanto il pannello delle ricerche recenti e la barra di ricerca (16 dp dai bordi).
                 Modifier
-                    .padding(horizontal = 24.dp)
+                    .padding(horizontal = 16.dp)
                     .fillMaxWidth()
                     .onGloballyPositioned { finalBounds = it.boundsInWindow() }
             ) {
