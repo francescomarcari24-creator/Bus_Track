@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -208,6 +209,31 @@ fun PillSwitch(
         tonalElevation = 3.dp,
     ) {
         PillTabs(labels, selected, onSelect, position)
+    }
+}
+
+/**
+ * Tasto rotondo con lo stesso aspetto della pillola (altezza, colore, ombra), da affiancarle
+ * (es. impostazioni accanto a "Preferiti / Vicine").
+ */
+@Composable
+fun PillButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.size(BarHeight),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        tonalElevation = 3.dp,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(icon, contentDescription, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

@@ -36,6 +36,11 @@
             android:name=".watch.ArrivalWatchService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.BusTrack" />
         <!-- Widget "prossimi passaggi" di una fermata preferita. -->
         <receiver
             android:name=".widget.StopWidgetReceiver"

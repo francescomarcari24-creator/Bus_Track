@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,30 +48,6 @@ import com.example.bustrack.gtfs.Stop
 import com.example.bustrack.gtfs.VehiclePosition
 import com.example.bustrack.gtfs.VehicleStopStatus
 import java.time.Instant
-
-/** Popup per scegliere la direzione della linea. */
-@Composable
-fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Linea ${choice.route.label}: scegli la direzione") },
-        text = {
-            // Riquadro con gli stessi angoli arrotondati del resto dell'app.
-            Column(Modifier.clip(CardCorner)) {
-                choice.patterns.forEach { pattern ->
-                    AppListItem(
-                        supportingContent = pattern.fromStopName?.let { from -> { Text("da $from · ${pattern.stopIds.size} fermate") } },
-                        modifier = Modifier.clickable { onPick(pattern) },
-                    ) {
-                        Text("→ ${pattern.headsign ?: "Direzione ${pattern.directionId}"}", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
-    )
-}
 
 /** Elenco delle fermate della linea nella direzione scelta, con i mezzi live evidenziati. */
 @Composable
@@ -114,7 +89,11 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             // Aperta dalla mappa: indietro torna alla scheda Mappa (la linea resta sotto, come una fermata dalla mappa).
             val backToMap = stopsState.lineFromMap && returnStop == null
             val tabBack = LocalTabBack.current
-            TextButton(onClick = if (backToMap) tabBack else vm::closeLine, contentPadding = BackButtonPadding) {
+            val animatedBack = LocalAnimatedBack.current
+            TextButton(
+                onClick = { if (backToMap) tabBack() else animatedBack?.invoke() ?: vm.closeLine() },
+                contentPadding = BackButtonPadding,
+            ) {
                 BackLabel(returnStop?.name ?: if (backToMap) "Mappa" else "Ricerca")
             }
             Spacer(Modifier.weight(1f))

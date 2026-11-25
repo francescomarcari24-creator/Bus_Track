@@ -37,7 +37,7 @@ fun TimetableScreen(state: TimetableState, vm: TransitViewModel) {
     val today = LocalDate.now(ROME_ZONE)
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         TextButton(
-            onClick = vm::closeTimetable,
+            onClick = LocalAnimatedBack.current ?: vm::closeTimetable,
             contentPadding = BackButtonPadding,
             modifier = Modifier.padding(top = 8.dp),
         ) {

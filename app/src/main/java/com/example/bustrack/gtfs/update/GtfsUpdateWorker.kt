@@ -33,19 +33,28 @@ class GtfsUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val force = inputData.getBoolean(KEY_FORCE, false)
         try {
             runCatching { setForeground(foregroundInfo()) }
-            when (val result = GtfsUpdater(applicationContext).run(force)) {
-                GtfsUpdater.Result.UpToDate -> Log.i(TAG, "GTFS già aggiornato")
+            val outcome = when (val result = GtfsUpdater(applicationContext).run(force)) {
+                GtfsUpdater.Result.UpToDate -> {
+                    Log.i(TAG, "GTFS già aggiornato")
+                    OUTCOME_UP_TO_DATE
+                }
                 GtfsUpdater.Result.WaitingForWifi -> {
                     Log.i(TAG, "GTFS nuovo disponibile: si aspetta il Wi-Fi")
                     enqueueOnWifi(applicationContext)
+                    OUTCOME_WAITING_WIFI
                 }
-                is GtfsUpdater.Result.Updated -> Log.i(TAG, "GTFS aggiornato, valido fino al ${result.feedEndDate}")
+                is GtfsUpdater.Result.Updated -> {
+                    Log.i(TAG, "GTFS aggiornato, valido fino al ${result.feedEndDate}")
+                    OUTCOME_UPDATED
+                }
             }
-            Result.success()
+            Result.success(workDataOf(KEY_OUTCOME to outcome))
         } catch (e: Exception) {
             Log.w(TAG, "Aggiornamento GTFS fallito", e)
-            // Si riprova più tardi (attesa crescente), al massimo qualche volta: poi ci pensa il controllo del giorno dopo.
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            // Controllo chiesto a mano: si dice subito che non è andato. Quello automatico riprova
+            // più tardi (attesa crescente), al massimo qualche volta: poi c'è il controllo del giorno dopo.
+            if (!inputData.getBoolean(KEY_MANUAL, false) && runAttemptCount < 3) Result.retry()
+            else Result.failure(workDataOf(KEY_OUTCOME to OUTCOME_FAILED))
         }
     }
 
@@ -72,9 +81,16 @@ class GtfsUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWo
         private const val CHANNEL = "gtfs_update"
         private const val NOTIFICATION_ID = 1101
         private const val KEY_FORCE = "force"
+        private const val KEY_MANUAL = "manual"
+        const val KEY_OUTCOME = "outcome"
+        const val OUTCOME_UP_TO_DATE = "up_to_date"
+        const val OUTCOME_WAITING_WIFI = "waiting_wifi"
+        const val OUTCOME_UPDATED = "updated"
+        const val OUTCOME_FAILED = "failed"
+        /** Nome del controllo immediato, per seguirne l'esito (schermata Impostazioni). */
+        const val NOW_NAME = "gtfs-update-now"
         private const val PERIODIC = "gtfs-update-daily"
         private const val ON_WIFI = "gtfs-update-wifi"
-        private const val NOW = "gtfs-update-now"
 
         /** Controllo giornaliero, da chiamare all'avvio dell'app (se già pianificato non cambia nulla). */
         fun schedule(context: Context) {
@@ -107,9 +123,9 @@ class GtfsUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWo
         /** Aggiornamento immediato (prove): con [force] ricostruisce anche se l'MD5 non è cambiato. */
         fun runNow(context: Context, force: Boolean) {
             val request = OneTimeWorkRequestBuilder<GtfsUpdateWorker>()
-                .setInputData(workDataOf(KEY_FORCE to force))
+                .setInputData(workDataOf(KEY_FORCE to force, KEY_MANUAL to true))
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(NOW_NAME, ExistingWorkPolicy.REPLACE, request)
         }
     }
 }

@@ -38,6 +38,13 @@ import kotlinx.coroutines.launch
  */
 val LocalInBackPreview = staticCompositionLocalOf { false }
 
+/**
+ * Indietro animato come il gesto di Android (la pagina scorre verso destra e scopre la
+ * precedente), per i tasti "←" delle pagine dentro un [PredictiveBackLayer]. Null fuori da un
+ * livello con una pagina precedente: lì il tasto fa il suo lavoro senza animazione.
+ */
+val LocalAnimatedBack = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 /** Stato del gesto indietro predittivo: avanzamento (0..1), lato da cui parte e se è in corso. */
 class BackGestureState {
     val progress = Animatable(0f)
@@ -114,6 +121,26 @@ fun PredictiveBackLayer(
     content: @Composable () -> Unit,
 ) {
     val gesture = rememberBackGesture(enabled, onBack)
+    val scope = rememberCoroutineScope()
+    val currentOnBack by rememberUpdatedState(onBack)
+    // Tasto "←": stessa animazione del gesto confermato, dal bordo sinistro (la pagina va a destra).
+    val animatedBack: () -> Unit = remember(gesture) {
+        {
+            if (!gesture.active) {
+                scope.launch {
+                    gesture.active = true
+                    gesture.edge = BackEventCompat.EDGE_LEFT
+                    try {
+                        gesture.progress.animateTo(1f, tween(durationMillis = 320, easing = FastOutSlowInEasing))
+                        currentOnBack()
+                        gesture.progress.snapTo(0f)
+                    } finally {
+                        gesture.active = false
+                    }
+                }
+            }
+        }
+    }
     Box(modifier.fillMaxSize()) {
         if (enabled && gesture.showing) {
             // L'anteprima resta ferma e a tutto schermo (uno spostamento lascerebbe scoperto un bordo).
@@ -132,7 +159,7 @@ fun PredictiveBackLayer(
                 .graphicsLayer { applyBackExit(gesture) }
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            content()
+            CompositionLocalProvider(LocalAnimatedBack provides if (enabled) animatedBack else null) { content() }
         }
     }
 }

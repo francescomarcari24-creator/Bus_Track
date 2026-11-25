@@ -37,7 +37,8 @@ class GtfsUpdater(private val context: Context) {
         val current = GtfsStaticDb.currentInfo(context)
         Log.i(TAG, "GTFS: pubblicato $remoteMd5, in uso ${current?.sourceMd5} (valido fino al ${current?.feedEndDate})")
         if (!force && current?.sourceMd5 == remoteMd5) return Result.UpToDate
-        if (!force && isMetered() && !expiresSoon(current?.feedEndDate)) return Result.WaitingForWifi
+        val wifiOnly = com.example.bustrack.settings.AppSettings.get(context).gtfsWifiOnly.value
+        if (!force && wifiOnly && isMetered() && !expiresSoon(current?.feedEndDate)) return Result.WaitingForWifi
 
         val dir = File(context.noBackupFilesDir, "gtfs-update").apply { mkdirs() }
         val zip = File(dir, "rome_static_gtfs.zip")

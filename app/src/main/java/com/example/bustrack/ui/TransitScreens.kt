@@ -3,6 +3,9 @@ package com.example.bustrack.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Box
@@ -34,6 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
 import com.example.bustrack.watch.ArrivalWatch
@@ -170,6 +174,14 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         vm.openStopById(id)
         openTab(0)
     }
+    // Notifica di un avviso sui preferiti: scheda Avvisi, elenco completo.
+    val pendingAlerts by com.example.bustrack.PendingStopOpen.alerts.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingAlerts) {
+        if (!pendingAlerts) return@LaunchedEffect
+        com.example.bustrack.PendingStopOpen.alerts.value = false
+        scrollMemory.alertsQuery = ""
+        openTab(2)
+    }
     // Popup della direzione: sta qui, fuori dalle schede, perché deve comparire sopra qualunque
     // scheda (dentro la Home verrebbe soppresso quando la Home non è visibile, es. dalla mappa).
     stopsState.directionChoice?.let { choice ->
@@ -228,13 +240,21 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 // Indietro tra le schede: la scheda precedente si scopre sotto (vedi TabPager).
                 // I gestori interni (es. pagine dentro Home) sono composti dopo e hanno la precedenza.
-                TabPager(
-                    position = tabPosition,
-                    count = 3,
-                    current = tab,
-                    gesture = tabGesture,
-                    previewTab = history.getOrNull(history.size - 2),
-                ) { t -> TabContent(t, vm) }
+                Column(Modifier.fillMaxSize()) {
+                    // Senza rete: fascia in alto finché la connessione non torna (poi i dati live
+                    // si ricaricano da soli, vedi TransitViewModel.onReconnected).
+                    val online by com.example.bustrack.settings.Connectivity.online.collectAsStateWithLifecycle()
+                    androidx.compose.animation.AnimatedVisibility(visible = !online) { OfflineBanner() }
+                    Box(Modifier.weight(1f)) {
+                        TabPager(
+                            position = tabPosition,
+                            count = 3,
+                            current = tab,
+                            gesture = tabGesture,
+                            previewTab = history.getOrNull(history.size - 2),
+                        ) { t -> TabContent(t, vm) }
+                    }
+                }
                 FloatingTabBar(
                     labels = listOf("Home", "Mappa", "Avvisi"),
                     selected = tab,
@@ -339,8 +359,9 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             val refreshing by vm.refreshing.collectAsStateWithLifecycle()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val tabBack = LocalTabBack.current
+                val animatedBack = LocalAnimatedBack.current
                 TextButton(
-                    onClick = { if (state.openedFromMap) tabBack() else vm.selectStop(null) },
+                    onClick = { if (state.openedFromMap) tabBack() else animatedBack?.invoke() ?: vm.selectStop(null) },
                     contentPadding = BackButtonPadding,
                 ) {
                     BackLabel(
@@ -441,21 +462,47 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 if (i == 1 && !context.hasLocationPermission()) askPermission()
             }
             val homePosition = rememberTabPosition(if (showNearby) 1 else 0)
-            PillSwitch(
-                labels = listOf("Preferiti", "Vicine"),
-                selected = if (showNearby) 1 else 0,
-                onSelect = selectHome,
-                position = homePosition,
-                screenPadding = 16.dp,
-            )
+            // Pillola e tasto impostazioni affiancati, con spazi uguali: bordo, pillola, tasto, bordo
+            // (16 dp ciascuno, il margine della colonna).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PillSwitch(
+                    labels = listOf("Preferiti", "Vicine"),
+                    selected = if (showNearby) 1 else 0,
+                    onSelect = selectHome,
+                    position = homePosition,
+                    modifier = Modifier.weight(1f),
+                    screenPadding = 32.dp,
+                )
+                Spacer(Modifier.width(16.dp))
+                PillButton(
+                    Icons.Filled.Settings,
+                    contentDescription = "Impostazioni",
+                    onClick = { context.startActivity(Intent(context, com.example.bustrack.settings.SettingsActivity::class.java)) },
+                )
+            }
+            // Ricerche recenti: pannello che scende dalla barra quando la si tocca (campo vuoto).
+            val recentStore = remember { com.example.bustrack.favorites.RecentSearches.get(context) }
+            val recents by recentStore.items.collectAsStateWithLifecycle()
+            var searchFocused by remember { mutableStateOf(false) }
+            // Pannello tenuto aperto senza tastiera: dopo aver chiuso la finestra della direzione nata da lì.
+            var recentsPinned by remember { mutableStateOf(false) }
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+            val showRecents = (searchFocused || recentsPinned) && state.query.isBlank() && recents.isNotEmpty() && !inPreview
+            val closeRecents = { recentsPinned = false; focusManager.clearFocus() }
+            // Indietro con la tastiera/pannello aperti: si chiudono, senza lasciare la pagina.
+            androidx.activity.compose.BackHandler(enabled = (searchFocused || recentsPinned) && !inPreview) { closeRecents() }
             OutlinedTextField(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 label = { Text("Cerca linea, fermata o numero palina") },
                 singleLine = true,
                 shape = CardCorner,
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .onFocusChanged { searchFocused = it.isFocused },
             )
+            Box(Modifier.weight(1f)) {
             if (state.query.isBlank()) {
                 SlidingPanes(
                     homePosition,
@@ -522,7 +569,16 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                             supportingContent = {
                                 Text(listOfNotNull(route.longName, route.agencyName).joinToString(" · "))
                             },
-                            modifier = Modifier.clickable { vm.onRouteClick(route) },
+                            // La finestra della direzione nasce da questa riga (senza effetto al tocco).
+                            modifier = Modifier.clickableAsDialogOrigin(ripple = false) {
+                                recentStore.add(
+                                    com.example.bustrack.favorites.RecentItem.Line(
+                                        route.id, route.label,
+                                        listOfNotNull(route.longName, route.agencyName).joinToString(" · ").ifEmpty { null },
+                                    )
+                                )
+                                vm.onRouteClick(route)
+                            },
                         ) { Text("Linea ${route.label}") }
                     }
                     if (state.results.isNotEmpty()) item { SectionTitle("Fermate", alignToListItems = true) }
@@ -530,8 +586,133 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 items(state.results, key = { it.id }) { stop ->
                     AppListItem(
                         supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
-                        modifier = Modifier.clickable { vm.selectStop(stop) },
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            recentStore.add(com.example.bustrack.favorites.RecentItem.Stop(stop.id, stop.name, stop.code))
+                            vm.selectStop(stop)
+                        },
                     ) { Text(stop.name) }
+                }
+            }
+            // Pannello aperto: un tocco fuori lo chiude (e chiude la tastiera).
+            if (showRecents) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                        ) { closeRecents() }
+                )
+            }
+            RecentSearchesPanel(
+                visible = showRecents,
+                items = recents,
+                onPick = { item ->
+                    closeRecents()
+                    when (item) {
+                        is com.example.bustrack.favorites.RecentItem.Line -> vm.openRouteById(item.id)
+                        is com.example.bustrack.favorites.RecentItem.Stop -> vm.openStopById(item.id)
+                    }
+                    recentStore.add(item) // torna in cima
+                },
+                onPickLine = { item ->
+                    recentStore.add(item)
+                    vm.openRouteById(item.id)
+                },
+                onClose = { focusManager.clearFocus() },
+                onReturn = {
+                    // Chiudendo la finestra della direzione: il pannello riscende (senza tastiera, così
+                    // la riga torna dov'era) e, a discesa finita, la finestra rientra nella riga.
+                    recentsPinned = true
+                    kotlinx.coroutines.delay(RECENTS_PANEL_ANIMATION_MS)
+                },
+                onClear = { recentStore.clear(); closeRecents() },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            }
+        }
+    }
+}
+
+/** Durata circa della discesa del pannello dei recenti (molla a rigidità medio-bassa). */
+private const val RECENTS_PANEL_ANIMATION_MS = 380L
+
+/**
+ * Pannello "Ricerche recenti": scende da sotto la barra di ricerca, largo come lei e con gli
+ * stessi angoli; si apre e si richiude verso l'alto con una molla, come le altre animazioni
+ * dell'app. Gli angoli restano arrotondati anche durante il movimento (il ritaglio della
+ * superficie segue l'altezza animata).
+ */
+@Composable
+private fun RecentSearchesPanel(
+    visible: Boolean,
+    items: List<com.example.bustrack.favorites.RecentItem>,
+    onPick: (com.example.bustrack.favorites.RecentItem) -> Unit,
+    /** Linea scelta: il pannello resta aperto finché la finestra della direzione non è aperta. */
+    onPickLine: (com.example.bustrack.favorites.RecentItem.Line) -> Unit,
+    onClose: () -> Unit,
+    /** Finestra della direzione in chiusura: riapre il pannello e aspetta che sia sceso. */
+    onReturn: suspend () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val spec = androidx.compose.animation.core.spring<androidx.compose.ui.unit.IntSize>(
+        stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = CardCorner,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        tonalElevation = 3.dp,
+    ) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = visible,
+            enter = androidx.compose.animation.expandVertically(spec, expandFrom = Alignment.Top) +
+                androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically(spec, shrinkTowards = Alignment.Top) +
+                androidx.compose.animation.fadeOut(),
+        ) {
+            Column(
+                Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = ListItemInset)) {
+                    Text(
+                        "Ricerche recenti",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onClear) { Text("Cancella") }
+                }
+                CompositionLocalProvider(LocalTransparentListItems provides true) {
+                    items.forEach { item ->
+                        when (item) {
+                            is com.example.bustrack.favorites.RecentItem.Line -> AppListItem(
+                                leadingContent = { RouteBadge(item.label) },
+                                supportingContent = item.subtitle?.let { sub -> { Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                                // La finestra della direzione nasce da questa riga; il pannello si chiude
+                                // solo quando lei è aperta del tutto.
+                                modifier = Modifier.clickableAsDialogOrigin(onShown = onClose, onReturn = onReturn, ripple = false) {
+                                    onPickLine(item)
+                                },
+                            ) { Text("Linea ${item.label}") }
+                            is com.example.bustrack.favorites.RecentItem.Stop -> AppListItem(
+                                supportingContent = { Text("Palina ${item.code ?: item.id}") },
+                                // Niente effetto al tocco, come per le linee del pannello.
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null,
+                                ) { onPick(item) },
+                            ) { Text(item.name) }
+                        }
+                    }
                 }
             }
         }
@@ -962,17 +1143,32 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
     }
 }
 
+/** Fascia "sei offline" in cima all'app. */
+@Composable
+private fun OfflineBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            "Sei offline: orari programmati, i dati live tornano da soli",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+}
+
 /** Chiave (preferenze "ui") dell'ultima vista scelta nella Home: true = fermate vicine. */
 private const val PREF_HOME_SHOW_NEARBY = "home_show_nearby"
-
-/** Soglie proposte per l'avviso di arrivo, in minuti. */
-private val WatchThresholds = listOf(1, 3, 5, 10)
 
 /** Scelta di quando essere avvisati per un passaggio: solo le soglie non ancora raggiunte. */
 @Composable
 private fun WatchDialog(arrival: Arrival, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
     val minutes = ((arrival.time - System.currentTimeMillis() / 1000) / 60).coerceAtLeast(0)
-    val options = WatchThresholds.filter { it < minutes }
+    // Soglie scelte nelle impostazioni, solo quelle non ancora raggiunte.
+    val thresholds by com.example.bustrack.settings.AppSettings.get(LocalContext.current).watchThresholds.collectAsStateWithLifecycle()
+    val options = thresholds.filter { it < minutes }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Avvisami per il ${arrival.routeLabel}" + (arrival.headsign?.let { " → $it" } ?: "")) },
@@ -1022,10 +1218,12 @@ private fun LazyListScope.nearbySection(
         NearbyState.NoPermission -> "Per vedere le fermate vicine serve l'accesso alla posizione."
         NearbyState.LocationOff -> "La localizzazione del telefono è spenta."
         NearbyState.NoFix -> "Posizione non disponibile: riprova tra poco."
-        is NearbyState.Ready -> when (state.stops.size) {
-            0 -> "Nessuna fermata entro 1 km"
-            1 -> "1 fermata entro 1 km"
-            else -> "${state.stops.size} fermate entro 1 km"
+        is NearbyState.Ready -> com.example.bustrack.settings.AppSettings.formatDistance(state.radiusM).let { r ->
+            when (state.stops.size) {
+                0 -> "Nessuna fermata entro $r"
+                1 -> "1 fermata entro $r"
+                else -> "${state.stops.size} fermate entro $r"
+            }
         } + " · posizione delle " + HHMM.format(Instant.ofEpochMilli(state.fetchedAt)) +
             (state.accuracy?.let { " (±$it m)" } ?: "")
     }

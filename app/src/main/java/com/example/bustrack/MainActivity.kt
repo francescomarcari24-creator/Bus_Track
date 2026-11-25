@@ -13,6 +13,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Aperta dal widget: mostra gli arrivi di quella fermata (vedi BusTrackApp).
         if (savedInstanceState == null) intent?.getStringExtra(EXTRA_OPEN_STOP_ID)?.let { PendingStopOpen.stopId.value = it }
+        // Aperta da una notifica di avviso: scheda Avvisi.
+        if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_ALERTS, false) == true) PendingStopOpen.alerts.value = true
+        // Notifiche dei nuovi avvisi sulle linee e fermate preferite (se attive nelle impostazioni).
+        if (com.example.bustrack.settings.AppSettings.get(this).favoriteAlerts.value) {
+            com.example.bustrack.watch.FavoriteAlertsWorker.schedule(this)
+        }
         enableEdgeToEdge()
         // Controllo giornaliero di nuovi orari e fermate di Roma Mobilità (se già pianificato non cambia nulla).
         GtfsUpdateWorker.schedule(this)
@@ -32,15 +38,19 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_OPEN_STOP_ID)?.let { PendingStopOpen.stopId.value = it }
+        if (intent.getBooleanExtra(EXTRA_OPEN_ALERTS, false)) PendingStopOpen.alerts.value = true
     }
 
     companion object {
         /** Id della fermata da aprire all'avvio (dal widget). */
         const val EXTRA_OPEN_STOP_ID = "open_stop_id"
+        /** Apre la scheda Avvisi (dalle notifiche degli avvisi sui preferiti). */
+        const val EXTRA_OPEN_ALERTS = "open_alerts"
     }
 }
 
-/** Fermata da aprire chiesta da fuori (widget); BusTrackApp la apre e la azzera. */
+/** Pagine da aprire chieste da fuori (widget, notifiche); BusTrackApp le apre e le azzera. */
 object PendingStopOpen {
     val stopId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val alerts = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

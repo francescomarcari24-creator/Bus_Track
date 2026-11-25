@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -85,6 +86,8 @@ sealed interface NearbyState {
     data object NoFix : NearbyState
     data class Ready(
         val stops: List<NearbyStop>,
+        /** Raggio usato per la ricerca, in metri (vedi impostazioni). */
+        val radiusM: Int,
         /** Precisione della posizione in metri (null se sconosciuta). */
         val accuracy: Int?,
         val fetchedAt: Long = System.currentTimeMillis(),
@@ -147,11 +150,37 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     private val _favorites = MutableStateFlow(FavoritesState())
     val favorites: StateFlow<FavoritesState> = _favorites
 
+    private val settings = com.example.bustrack.settings.AppSettings.get(app)
+
     init {
         // Ogni modifica ai preferiti ricarica nomi e percorsi dal database statico.
         viewModelScope.launch {
             favoritesStore.items.collect { items -> _favorites.value = resolveFavorites(items) }
         }
+        // Cambiando il raggio nelle impostazioni si rifà la ricerca delle fermate vicine.
+        // drop(1): il primo valore arriva subito, a costruzione non ancora finita; contano i cambi.
+        viewModelScope.launch {
+            settings.nearbyRadiusM.drop(1).collect { radius ->
+                val current = _nearby.value
+                if (current is NearbyState.Ready && current.radiusM != radius) refreshNearby(manual = true)
+            }
+        }
+        // Rete tornata: i dati live si ricaricano subito, senza aspettare il ciclo successivo.
+        com.example.bustrack.settings.Connectivity.start(app)
+        viewModelScope.launch {
+            var wasOnline = com.example.bustrack.settings.Connectivity.online.value
+            com.example.bustrack.settings.Connectivity.online.collect { online ->
+                if (online && !wasOnline) onReconnected()
+                wasOnline = online
+            }
+        }
+    }
+
+    private fun onReconnected() {
+        if (_vehicles.value !is Load.Idle) refreshVehicles()
+        if (_alerts.value !is Load.Idle) refreshAlerts()
+        _stops.value.selected?.let { startArrivalsLoop(it, manual = false) }
+        if (_stops.value.line != null) startLineLoop(manual = false)
     }
 
     private suspend fun resolveFavorites(items: List<Favorite>): FavoritesState {
@@ -216,11 +245,12 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
                     return@tracked
                 }
                 val all = runCatching { repo.allStops() }.getOrDefault(emptyList())
-                val near = com.example.bustrack.gtfs.nearestStops(all, location.latitude, location.longitude)
+                val radius = settings.nearbyRadiusM.value
+                val near = com.example.bustrack.gtfs.nearestStops(all, location.latitude, location.longitude, maxMeters = radius.toDouble())
                     .map { (stop, meters) ->
                         NearbyStop(stop, meters.toInt(), runCatching { repo.routesForStop(stop.id) }.getOrDefault(emptyList()))
                     }
-                _nearby.value = NearbyState.Ready(near, location.takeIf { it.hasAccuracy() }?.accuracy?.toInt())
+                _nearby.value = NearbyState.Ready(near, radius, location.takeIf { it.hasAccuracy() }?.accuracy?.toInt())
             }
         }
     }
@@ -477,6 +507,14 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         startArrivalsLoop(stop, manual = false) {
             val routes = runCatching { repo.routesForStop(stop.id) }.getOrDefault(emptyList())
             _stops.update { it.copy(routes = routes, arrivals = Load.Loading) }
+        }
+    }
+
+    /** Riapre una linea dalle ricerche recenti: come toccarla nei risultati (popup della direzione). */
+    fun openRouteById(routeId: String) {
+        viewModelScope.launch {
+            val route = runCatching { repo.route(routeId) }.getOrNull() ?: return@launch
+            onRouteClick(route)
         }
     }
 
