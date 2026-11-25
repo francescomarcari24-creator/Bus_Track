@@ -241,21 +241,17 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 // Indietro tra le schede: la scheda precedente si scopre sotto (vedi TabPager).
                 // I gestori interni (es. pagine dentro Home) sono composti dopo e hanno la precedenza.
-                Column(Modifier.fillMaxSize()) {
-                    // Senza rete: fascia in alto finché la connessione non torna (poi i dati live
-                    // si ricaricano da soli, vedi TransitViewModel.onReconnected).
-                    val online by com.example.bustrack.settings.Connectivity.online.collectAsStateWithLifecycle()
-                    androidx.compose.animation.AnimatedVisibility(visible = !online) { OfflineBanner() }
-                    Box(Modifier.weight(1f)) {
-                        TabPager(
-                            position = tabPosition,
-                            count = 3,
-                            current = tab,
-                            gesture = tabGesture,
-                            previewTab = history.getOrNull(history.size - 2),
-                        ) { t -> TabContent(t, vm) }
-                    }
-                }
+                TabPager(
+                    position = tabPosition,
+                    count = 3,
+                    current = tab,
+                    gesture = tabGesture,
+                    previewTab = history.getOrNull(history.size - 2),
+                ) { t -> TabContent(t, vm) }
+                // Senza rete: pillola sopra la barra finché la connessione non torna (poi i dati live
+                // si ricaricano da soli, vedi TransitViewModel.onReconnected).
+                val online by com.example.bustrack.settings.Connectivity.online.collectAsStateWithLifecycle()
+                OfflinePill(visible = !online, modifier = Modifier.align(Alignment.BottomCenter))
                 FloatingTabBar(
                     labels = listOf("Home", "Mappa", "Avvisi"),
                     selected = tab,
@@ -1159,22 +1155,6 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
                 modifier = Modifier.clickable { vm.selectStop(stop) },
             ) { Text(stop.name) }
         }
-    }
-}
-
-/** Fascia "sei offline" in cima all'app. */
-@Composable
-private fun OfflineBanner() {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            "Sei offline: orari programmati, i dati live tornano da soli",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
     }
 }
 

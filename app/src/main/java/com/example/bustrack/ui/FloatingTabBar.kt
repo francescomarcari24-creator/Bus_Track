@@ -19,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -231,6 +232,53 @@ fun PillSwitch(
         tonalElevation = 3.dp,
     ) {
         PillTabs(labels, selected, onSelect, position)
+    }
+}
+
+/**
+ * Avviso "sei offline": pillola con lo stesso aspetto della barra in basso (forma, colore, ombra,
+ * margini laterali), appoggiata appena sopra di lei. Entra salendo dal basso e sparisce scendendo,
+ * senza spostare il contenuto della pagina.
+ */
+@Composable
+fun OfflinePill(visible: Boolean, modifier: Modifier = Modifier) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = androidx.compose.animation.slideInVertically { it / 2 } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically { it / 2 } + androidx.compose.animation.fadeOut(),
+    ) {
+        Surface(
+            modifier = Modifier
+                .navigationBarsPadding()
+                .padding(start = BarSideMargin, end = BarSideMargin, bottom = BarBottomMargin + BarHeight + 8.dp)
+                .fillMaxWidth()
+                .height(40.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 8.dp,
+            tonalElevation = 3.dp,
+        ) {
+            Row(
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Rounded.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                Text(
+                    "Sei offline · orari programmati",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
