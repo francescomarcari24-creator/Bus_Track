@@ -3,6 +3,7 @@ package com.example.bustrack.ui
 import android.app.Application
 import android.location.Address
 import android.location.Geocoder
+import android.location.Location
 import android.util.Log
 import com.example.bustrack.gtfs.GtfsStaticDb
 import com.example.bustrack.gtfs.Polyline
@@ -77,6 +78,9 @@ sealed interface LegView {
     ) : LegView
 }
 
+fun LegView.lat(): DoubleArray = when (this) { is LegView.Walk -> lat; is LegView.Ride -> lat }
+fun LegView.lon(): DoubleArray = when (this) { is LegView.Walk -> lon; is LegView.Ride -> lon }
+
 class JourneyView(val legs: List<LegView>, val rides: Int, val walkMeters: Int, val origin: Place, val destination: Place) {
     val departure: Long get() = legs.first().departure
     val arrival: Long get() = legs.last().arrival
@@ -106,7 +110,17 @@ data class NavigationState(
     val active: JourneyView? = null,
     /** Orari live delle corse della navigazione, per "tripId|stopId" (epoch secondi). */
     val live: Map<String, Long> = emptyMap(),
+    /** Dove si è nel percorso, dalla posizione (null finché non arriva una posizione). */
+    val progress: NavProgress? = null,
+    /** Ultimo ricalcolo automatico del percorso durante il viaggio. */
+    val reroute: RerouteNotice? = null,
 )
+
+/** Tratto in corso ([leg], indice in [JourneyView.legs]) e, se a piedi, metri che mancano alla sua fine. */
+data class NavProgress(val leg: Int, val remainingMeters: Int?)
+
+/** Percorso ricalcolato alle [at] (epoch secondi) per il motivo [reason]. */
+data class RerouteNotice(val at: Long, val reason: String)
 
 /**
  * Logica della scheda Nav: suggerimenti dei luoghi (fermate dal GTFS e indirizzi dal geocoder di
@@ -129,13 +143,32 @@ class NavigationModel(
     fun setOptions(value: com.example.bustrack.routing.PlanOptions) {
         settings.setRouteOptions(value)
         if (_state.value.destination != null) {
-            _state.update { it.copy(active = null, live = emptyMap()) }
+            _state.update { it.copy(active = null, live = emptyMap(), progress = null, reroute = null) }
             plan()
         }
     }
 
     private val _state = MutableStateFlow(NavigationState())
     val state: StateFlow<NavigationState> = _state
+
+    /** Ultimi luoghi scelti (pannello "Ricerche recenti" dei campi). */
+    val recents = NavRecents.get(app)
+
+    /**
+     * Navigazione diretta verso [place] (es. una fermata aperta dalla Home): chiude un'eventuale
+     * navigazione in corso, imposta l'arrivo e calcola i percorsi dalla partenza scelta.
+     */
+    fun navigateTo(place: Place) {
+        suggestJob?.cancel()
+        recents.add(place)
+        _state.update {
+            it.copy(
+                destination = place, active = null, live = emptyMap(), progress = null, reroute = null,
+                suggestions = emptyList(), suggestField = null, searchingPlaces = false,
+            )
+        }
+        plan()
+    }
     private var suggestJob: Job? = null
     private var planJob: Job? = null
 
@@ -174,6 +207,7 @@ class NavigationModel(
     /** Luogo scelto da un suggerimento ([place] null = posizione attuale, solo per la partenza). */
     fun choose(field: PlaceField, place: Place?) {
         suggestJob?.cancel()
+        place?.let(recents::add)
         _state.update {
             val s = it.copy(suggestions = emptyList(), suggestField = null, searchingPlaces = false)
             when (field) {
@@ -205,24 +239,7 @@ class NavigationModel(
                     Place("La tua posizione", null, loc.latitude, loc.longitude, PlaceKind.MY_LOCATION)
                 }
                 _state.update { it.copy(plan = PlanStatus.Preparing) }
-                val now = System.currentTimeMillis() / 1000
-                // Previsioni live scaricate intanto che si preparano gli orari.
-                val liveJob = scope.async { withTimeoutOrNull(8_000) { runCatching { repo.tripUpdates() }.getOrNull() } }
-                val planner = RoutingEngine.prepare(app)
-                _state.update { it.copy(plan = PlanStatus.Searching) }
-                val live = liveJob.await()?.let { snapshot -> liveInfo(snapshot.items, now) }
-                val result = withContext(Dispatchers.Default) {
-                    planner.plan(origin.lat, origin.lon, dest.lat, dest.lon, now, options.value, live)
-                }
-                val status = when (result) {
-                    RoutePlanner.Result.OffNetwork -> PlanStatus.Failed("Partenza o arrivo fuori dalla zona coperta (Roma).")
-                    RoutePlanner.Result.NoRoute -> PlanStatus.Failed(
-                        if (options.value == com.example.bustrack.routing.PlanOptions()) "Nessun percorso trovato in partenza adesso."
-                        else "Nessun percorso trovato in partenza adesso con le preferenze scelte."
-                    )
-                    is RoutePlanner.Result.Journeys ->
-                        PlanStatus.Ready(withContext(Dispatchers.IO) { result.journeys.map { toView(it, origin, dest) } }, live = live != null)
-                }
+                val status = compute(origin, dest) { _state.update { it.copy(plan = PlanStatus.Searching) } }
                 _state.update { it.copy(plan = status) }
             } catch (e: CancellationException) {
                 throw e
@@ -230,6 +247,28 @@ class NavigationModel(
                 Log.e(TAG, "Calcolo del percorso", e)
                 fail("Errore nel calcolo del percorso.")
             }
+        }
+    }
+
+    /** Percorsi da [origin] a [dest] in partenza adesso, con i dati live se raggiungibili. */
+    private suspend fun compute(origin: Place, dest: Place, onSearching: () -> Unit = {}): PlanStatus {
+        val now = System.currentTimeMillis() / 1000
+        // Previsioni live scaricate intanto che si preparano gli orari.
+        val liveJob = scope.async { withTimeoutOrNull(8_000) { runCatching { repo.tripUpdates() }.getOrNull() } }
+        val planner = RoutingEngine.prepare(app)
+        onSearching()
+        val live = liveJob.await()?.let { snapshot -> liveInfo(snapshot.items, now) }
+        val result = withContext(Dispatchers.Default) {
+            planner.plan(origin.lat, origin.lon, dest.lat, dest.lon, now, options.value, live)
+        }
+        return when (result) {
+            RoutePlanner.Result.OffNetwork -> PlanStatus.Failed("Partenza o arrivo fuori dalla zona coperta (Roma).")
+            RoutePlanner.Result.NoRoute -> PlanStatus.Failed(
+                if (options.value == com.example.bustrack.routing.PlanOptions()) "Nessun percorso trovato in partenza adesso."
+                else "Nessun percorso trovato in partenza adesso con le preferenze scelte."
+            )
+            is RoutePlanner.Result.Journeys ->
+                PlanStatus.Ready(withContext(Dispatchers.IO) { result.journeys.map { toView(it, origin, dest) } }, live = live != null)
         }
     }
 
@@ -248,9 +287,90 @@ class NavigationModel(
 
     private fun fail(message: String) = _state.update { it.copy(plan = PlanStatus.Failed(message)) }
 
-    fun startNavigation(journey: JourneyView) = _state.update { it.copy(active = journey, live = emptyMap()) }
+    fun startNavigation(journey: JourneyView) {
+        offRouteFixes = 0
+        _state.update { it.copy(active = journey, live = emptyMap(), progress = null, reroute = null) }
+    }
 
-    fun stopNavigation() = _state.update { it.copy(active = null, live = emptyMap()) }
+    fun stopNavigation() = _state.update { it.copy(active = null, live = emptyMap(), progress = null, reroute = null) }
+
+    // ---- Posizione durante il viaggio e ricalcolo ----
+
+    private var offRouteFixes = 0
+    private var lastRerouteAt = 0L
+    private var rerouting = false
+
+    /**
+     * Segue la posizione finché la coroutine è attiva (la chiama l'app mentre è in primo piano e
+     * c'è una navigazione): aggiorna il tratto in corso e, se serve, ricalcola il percorso.
+     */
+    suspend fun track() {
+        app.locationUpdates().collect(::onLocation)
+    }
+
+    private fun onLocation(loc: Location) {
+        val journey = _state.value.active ?: return
+        val accuracy = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 30.0
+        if (accuracy > 80) return // posizione troppo imprecisa per decidere qualcosa
+        val now = System.currentTimeMillis() / 1000
+        // Tratto in corso: il più vicino tra quello attuale e i due successivi (non si torna indietro,
+        // e non si salta lontano solo perché la strada incrocia un tratto di molto dopo).
+        val from = _state.value.progress?.leg ?: 0
+        var leg = from
+        var proj = projectOnPolyline(loc.latitude, loc.longitude, journey.legs[from].lat(), journey.legs[from].lon())
+        for (i in from + 1..minOf(from + 2, journey.legs.lastIndex)) {
+            val p = projectOnPolyline(loc.latitude, loc.longitude, journey.legs[i].lat(), journey.legs[i].lon())
+            if (p.distance < proj.distance - 5) { leg = i; proj = p }
+        }
+        val current = journey.legs[leg]
+        val remaining = if (current is LegView.Walk) (proj.length - proj.along).coerceAtLeast(0.0).toInt() else null
+        _state.update { if (it.active === journey) it.copy(progress = NavProgress(leg, remaining)) else it }
+
+        // Fuori strada: a piedi e lontani dal percorso per due posizioni di fila.
+        val tolerance = maxOf(50.0, accuracy * 1.5)
+        offRouteFixes = if (current is LegView.Walk && proj.distance > tolerance) offRouteFixes + 1 else 0
+        // Mezzo perso: è partito (orario live se c'è) da più di un minuto e mezzo e si è ancora a piedi
+        // o fermi alla palina di salita.
+        val ride = when {
+            current is LegView.Ride && proj.along < 60 -> current
+            current is LegView.Walk -> journey.legs.getOrNull(leg + 1) as? LegView.Ride
+            else -> null
+        }
+        val missed = ride != null && now > (_state.value.live["${ride.tripId}|${ride.from.id}"] ?: ride.departure) + 90
+        val reason = when {
+            offRouteFixes >= 2 -> "sei fuori dal percorso"
+            missed -> "il ${ride!!.label} è già passato"
+            else -> return
+        }
+        if (rerouting || now - lastRerouteAt < 45) return
+        reroute(journey, loc, reason)
+    }
+
+    private fun reroute(journey: JourneyView, loc: Location, reason: String) {
+        rerouting = true
+        lastRerouteAt = System.currentTimeMillis() / 1000
+        scope.launch {
+            try {
+                val origin = Place("La tua posizione", null, loc.latitude, loc.longitude, PlaceKind.MY_LOCATION)
+                val best = (compute(origin, journey.destination) as? PlanStatus.Ready)?.journeys?.firstOrNull() ?: return@launch
+                _state.update {
+                    if (it.active === journey) {
+                        it.copy(
+                            active = best, live = emptyMap(), progress = null,
+                            reroute = RerouteNotice(System.currentTimeMillis() / 1000, reason),
+                        )
+                    } else it
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Ricalcolo del percorso", e)
+            } finally {
+                offRouteFixes = 0
+                rerouting = false
+            }
+        }
+    }
 
     /**
      * Aggiorna gli orari live di salite e discese della navigazione in corso.

@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.bustrack.gtfs.Arrival
 import com.example.bustrack.gtfs.ServiceAlert
 import com.example.bustrack.gtfs.Stop
@@ -105,6 +106,21 @@ internal val LocalTabBack = staticCompositionLocalOf<() -> Unit> { {} }
 
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
+
+/** Naviga fino a un luogo: apre la scheda Nav con l'arrivo impostato e i percorsi calcolati. */
+internal val LocalNavigateTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
+
+/** Icona Material "directions" (non inclusa in material-icons-core). */
+internal val DirectionsIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder("Directions", 24.dp, 24.dp, 24f, 24f).addPath(
+        androidx.compose.ui.graphics.vector.addPathNodes(
+            "M21.71,11.29l-9,-9c-0.39,-0.39 -1.02,-0.39 -1.41,0l-9,9c-0.39,0.39 -0.39,1.02 0,1.41l9,9c0.39,0.39 " +
+                "1.02,0.39 1.41,0l9,-9c0.39,-0.38 0.39,-1.01 0,-1.41zM14,14.5V12h-4v3H8v-4c0,-0.55 0.45,-1 1,-1h5V7.5" +
+                "l3.5,3.5 -3.5,3.5z"
+        ),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.Black),
+    ).build()
+}
 
 /** Apre l'elenco fermate di una linea nella scheda Home, dalla mappa (numero, route_id e direzione se noti). */
 internal val LocalOpenLineFromMap = staticCompositionLocalOf<(label: String, routeId: String?, directionId: Int?) -> Unit> { { _, _, _ -> } }
@@ -218,6 +234,23 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             openTab(Tabs.MAP)
         }
     }
+    // Navigazione fino a un luogo (es. dalla pagina di una fermata): scheda Nav con l'arrivo impostato.
+    val navigateTo = remember(vm) {
+        { place: Place ->
+            scrollMemory.routeTo = place.name
+            vm.navigation.navigateTo(place)
+            openTab(Tabs.ROUTE)
+        }
+    }
+    // Navigazione in corso e app in primo piano: si segue la posizione (tratto in corso, ricalcolo
+    // se si esce dal percorso o si perde il mezzo), in qualunque scheda ci si trovi.
+    val navActive = vm.navigation.state.collectAsStateWithLifecycle().value.active != null
+    val appLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(navActive) {
+        if (navActive) {
+            appLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { vm.navigation.track() }
+        }
+    }
     // Indietro di una scheda (usato dal gesto e dal pulsante "← Mappa" di una fermata aperta dalla mappa).
     val tabBack = remember(vm) {
         {
@@ -246,6 +279,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         LocalOpenLineFromMap provides openLineFromMap,
         LocalShowLineOnMap provides showLineOnMap,
         LocalTabBack provides tabBack,
+        LocalNavigateTo provides navigateTo,
     ) {
         // Solo la barra di stato in alto: in basso il contenuto arriva fino al bordo
         // e la barra flottante gli sta sopra.
@@ -382,9 +416,18 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                // Navigazione fino a questa fermata (scheda Nav, percorsi già calcolati).
+                val navigateTo = LocalNavigateTo.current
+                RoundButton(onClick = {
+                    navigateTo(Place(selected.name, "Palina ${selected.code ?: selected.id}", selected.lat, selected.lon, PlaceKind.STOP))
+                }) {
+                    Icon(DirectionsIcon, contentDescription = "Naviga fino a questa fermata", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(RoundButtonGap))
                 val favorites by vm.favoriteItems.collectAsStateWithLifecycle()
                 FavoriteButton(Favorite.StopFav(selected.id) in favorites) { vm.toggleFavoriteStop(selected) }
-                RefreshButton(TransitViewModel.REFRESH_ARRIVALS in refreshing, vm::refreshArrivals)
+                Spacer(Modifier.width(RoundButtonGap))
+                RefreshButton(TransitViewModel.REFRESH_ARRIVALS in refreshing, onClick = vm::refreshArrivals)
             }
             Text(selected.name, style = MaterialTheme.typography.headlineSmall)
             Text("Palina ${selected.code ?: selected.id}", style = MaterialTheme.typography.bodyMedium)
@@ -1344,7 +1387,7 @@ private fun LazyListScope.nearbySection(
                 modifier = Modifier.weight(1f),
             )
             if (state !is NearbyState.NoPermission && state !is NearbyState.LocationOff) {
-                RefreshButton(refreshing, onRefresh)
+                RefreshButton(refreshing, round = false, onClick = onRefresh)
             }
         }
     }
@@ -1385,25 +1428,36 @@ private fun LazyListScope.nearbySection(
 @Composable
 internal fun FavoriteButton(isFavorite: Boolean, onClick: () -> Unit) {
     val gold = if (androidx.compose.foundation.isSystemInDarkTheme()) Color(0xFFFFC94D) else Color(0xFFB67D00)
-    IconButton(onClick = onClick) {
+    RoundButton(onClick = onClick) {
         Icon(
             painterResource(if (isFavorite) R.drawable.ic_star else R.drawable.ic_star_border),
             contentDescription = if (isFavorite) "Rimuovi dai preferiti" else "Aggiungi ai preferiti",
-            tint = if (isFavorite) gold else LocalContentColor.current,
+            tint = if (isFavorite) gold else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** Tasto tondo con un'icona da risorsa (mappa della linea, orari...). */
+@Composable
+internal fun RoundIconButton(icon: Int, contentDescription: String, onClick: () -> Unit) {
+    RoundButton(onClick = onClick) {
+        Icon(painterResource(icon), contentDescription, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 /** Tasto "aggiorna" in alto a destra: durante l'aggiornamento mostra una rotellina. */
 @Composable
-internal fun RefreshButton(refreshing: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, enabled = !refreshing) {
+internal fun RefreshButton(refreshing: Boolean, round: Boolean = true, onClick: () -> Unit) {
+    val content = @Composable {
         if (refreshing) {
             Spinner(Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
-            Icon(painterResource(R.drawable.ic_refresh), contentDescription = "Aggiorna")
+            Icon(painterResource(R.drawable.ic_refresh), contentDescription = "Aggiorna", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+    // Tondo come gli altri tasti; semplice dentro gli elenchi (es. fermate vicine).
+    if (round) RoundButton(onClick = onClick, enabled = !refreshing) { content() }
+    else IconButton(onClick = onClick, enabled = !refreshing) { content() }
 }
 
 @Composable

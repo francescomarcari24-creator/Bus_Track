@@ -17,6 +17,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -219,7 +221,7 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                     null -> ""
                 }
                 when {
-                    active != null -> NavigationSteps(active, state.live, vehicles)
+                    active != null -> NavigationSteps(active, state.live, vehicles, state.progress, state.reroute)
                     focused == PlaceField.FROM || (focused == PlaceField.TO && query.trim().length >= 2) ->
                         Suggestions(
                             field = focused!!,
@@ -265,6 +267,21 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                 onToFocus = { f -> if (f) focused = PlaceField.TO else if (focused == PlaceField.TO) focused = null },
             )
         }
+        // Ricerche recenti: pannello che sale dal campo selezionato (vuoto), come quello che scende
+        // dalla barra di ricerca della Home; toccando una voce la si sceglie.
+        val recents by nav.recents.items.collectAsStateWithLifecycle()
+        val fieldText = when (focused) {
+            PlaceField.FROM -> from
+            PlaceField.TO -> to
+            null -> ""
+        }
+        NavRecentsPanel(
+            visible = active == null && focused != null && fieldText.isBlank() && recents.isNotEmpty() && !inPreview,
+            items = recents,
+            onPick = { place -> pick(focused ?: PlaceField.TO, place) },
+            onClear = nav.recents::clear,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = panelBottom - 4.dp),
+        )
         // Preferenze: nascono dal tasto in alto a destra (sopra a tutto il resto).
         RouteOptionsPanel(
             open = optionsOpen,
@@ -620,13 +637,103 @@ private fun JourneyCard(j: JourneyView, now: Long, onClick: () -> Unit) {
  * mezzo la palina dove salire (con attesa e orario, live se disponibile, e dove si trova il mezzo)
  * e quella dove scendere.
  */
+/**
+ * Ricerche recenti della scheda Nav: pannello che sale dal campo (si apre verso l'alto, con la
+ * stessa molla del pannello della Home che scende dalla barra di ricerca).
+ */
 @Composable
-private fun NavigationSteps(j: JourneyView, live: Map<String, Long>, vehicles: List<VehiclePosition>) {
+private fun NavRecentsPanel(
+    visible: Boolean,
+    items: List<Place>,
+    onPick: (Place) -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val spec = spring<androidx.compose.ui.unit.IntSize>(stiffness = Spring.StiffnessMediumLow)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = CardCorner,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 3.dp,
+    ) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = androidx.compose.animation.expandVertically(spec, expandFrom = Alignment.Bottom) + fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically(spec, shrinkTowards = Alignment.Bottom) + fadeOut(),
+        ) {
+            Column(
+                Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
+                    Text(
+                        "Ricerche recenti",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onClear) { Text("Cancella") }
+                }
+                items.forEach { p ->
+                    SuggestionRow(
+                        icon = if (p.kind == PlaceKind.STOP) BusIcon else Icons.Rounded.Place,
+                        title = p.name,
+                        detail = p.detail,
+                    ) { onPick(p) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Elenco dei passi della navigazione: per ogni tratto a piedi le strade da percorrere, per ogni
+ * mezzo la palina dove salire (con attesa e orario, live se disponibile, e dove si trova il mezzo)
+ * e quella dove scendere. Con la posizione: il tratto in corso è evidenziato (e l'elenco ci scorre),
+ * quelli già fatti sono attenuati; in cima l'eventuale ricalcolo del percorso.
+ */
+@Composable
+private fun NavigationSteps(
+    j: JourneyView,
+    live: Map<String, Long>,
+    vehicles: List<VehiclePosition>,
+    progress: NavProgress?,
+    reroute: RerouteNotice?,
+) {
     val now = rememberNow()
     val lastRide = j.legs.lastOrNull { it is LegView.Ride } as LegView.Ride?
     val shift = lastRide?.let { r -> live["${r.tripId}|${r.to.id}"]?.minus(r.arrival) } ?: 0L
     val arrival = j.arrival + shift
-    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)) {
+    val current = progress?.leg
+    // Partenza (live se nota) di ogni mezzo e attesa prima di lui.
+    fun waitBefore(i: Int): Long? {
+        val leg = j.legs[i] as? LegView.Ride ?: return null
+        val dep = live["${leg.tripId}|${leg.from.id}"] ?: leg.departure
+        val before = j.legs.getOrNull(i - 1)?.arrival ?: return null
+        return (dep - before).takeIf { it >= 60 }
+    }
+    // Indice della prima riga di ogni tratto, per scorrere fino a quello in corso.
+    val legStart = IntArray(j.legs.size).also { starts ->
+        var idx = 1 // riga di intestazione
+        j.legs.forEachIndexed { i, leg ->
+            starts[i] = idx
+            idx += when (leg) {
+                is LegView.Walk -> 1 + leg.instructions.size
+                is LegView.Ride -> 1 + (if (waitBefore(i) != null) 1 else 0)
+            }
+        }
+    }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(j, current) {
+        if (current != null && current > 0) listState.animateScrollToItem(legStart[current])
+    }
+    fun Modifier.done(i: Int) = graphicsLayer { alpha = if (current != null && i < current) 0.45f else 1f }
+    LazyColumn(
+        state = listState,
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
+    ) {
         item(key = "head") {
             Column(Modifier.padding(bottom = 12.dp)) {
                 Text("Arrivo previsto alle ${hhmm(arrival)}", style = MaterialTheme.typography.titleMedium)
@@ -635,39 +742,55 @@ private fun NavigationSteps(j: JourneyView, live: Map<String, Long>, vehicles: L
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                reroute?.let {
+                    Text(
+                        "Percorso ricalcolato alle ${hhmm(it.at)}: ${it.reason}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
         }
         j.legs.forEachIndexed { i, leg ->
+            val isCurrent = current == i
             when (leg) {
                 is LegView.Walk -> {
                     item(key = "walk$i") {
                         StepHeader(
                             icon = WalkIcon,
                             title = "A piedi · ${minutes(leg.arrival - leg.departure)} · ${distance(leg.meters)}",
-                            subtitle = "${hhmm(leg.departure)} → ${hhmm(leg.arrival)}",
+                            subtitle = if (isCurrent && progress?.remainingMeters != null) {
+                                "In corso · mancano ${distance(progress.remainingMeters)}"
+                            } else {
+                                "${hhmm(leg.departure)} → ${hhmm(leg.arrival)}"
+                            },
+                            current = isCurrent,
+                            modifier = Modifier.done(i),
                         )
                     }
                     leg.instructions.forEachIndexed { k, ins ->
-                        item(key = "walk$i-$k") { InstructionRow(ins) }
+                        item(key = "walk$i-$k") { Box(Modifier.done(i)) { InstructionRow(ins) } }
                     }
                 }
                 is LegView.Ride -> {
                     val liveDep = live["${leg.tripId}|${leg.from.id}"]
                     val liveArr = live["${leg.tripId}|${leg.to.id}"]
-                    val dep = liveDep ?: leg.departure
-                    val before = j.legs.getOrNull(i - 1)?.arrival
-                    if (before != null && dep - before >= 60) {
+                    waitBefore(i)?.let { wait ->
                         item(key = "wait$i") {
                             StepHeader(
                                 icon = ClockIcon,
-                                title = "Attesa alla palina: ${minutes(dep - before)}",
+                                title = "Attesa alla palina: ${minutes(wait)}",
                                 subtitle = null,
                                 dim = true,
+                                modifier = Modifier.done(i),
                             )
                         }
                     }
                     item(key = "ride$i") {
-                        RideStep(leg, liveDep, liveArr, vehicles.firstOrNull { it.tripId == leg.tripId }, now)
+                        Box(Modifier.done(i)) {
+                            RideStep(leg, liveDep, liveArr, vehicles.firstOrNull { it.tripId == leg.tripId }, now, isCurrent)
+                        }
                     }
                 }
             }
@@ -683,9 +806,16 @@ private fun NavigationSteps(j: JourneyView, live: Map<String, Long>, vehicles: L
 }
 
 @Composable
-private fun StepHeader(icon: ImageVector, title: String, subtitle: String?, dim: Boolean = false) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        StepIcon(icon, dim)
+private fun StepHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    dim: Boolean = false,
+    current: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        StepIcon(icon, dim, current)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -694,19 +824,29 @@ private fun StepHeader(icon: ImageVector, title: String, subtitle: String?, dim:
                 color = if (dim) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
             subtitle?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
 }
 
+/** Icona del passo: nel colore del tema pieno se è il tratto in corso. */
 @Composable
-private fun StepIcon(icon: ImageVector, dim: Boolean = false) {
+private fun StepIcon(icon: ImageVector, dim: Boolean = false, current: Boolean = false) {
+    val scheme = MaterialTheme.colorScheme
     Box(
         Modifier
             .size(36.dp)
             .background(
-                if (dim) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.primaryContainer,
+                when {
+                    current -> scheme.primary
+                    dim -> scheme.surfaceContainerHighest
+                    else -> scheme.primaryContainer
+                },
                 CircleShape,
             ),
         contentAlignment = Alignment.Center,
@@ -714,7 +854,11 @@ private fun StepIcon(icon: ImageVector, dim: Boolean = false) {
         Icon(
             icon,
             contentDescription = null,
-            tint = if (dim) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer,
+            tint = when {
+                current -> scheme.onPrimary
+                dim -> scheme.onSurfaceVariant
+                else -> scheme.onPrimaryContainer
+            },
             modifier = Modifier.size(20.dp),
         )
     }
@@ -754,10 +898,17 @@ private fun turnGlyph(t: Turn) = when (t) {
 
 /** Tratto in mezzo: linea e direzione, salita (con attesa e posizione del mezzo), fermate, discesa. */
 @Composable
-private fun RideStep(leg: LegView.Ride, liveDep: Long?, liveArr: Long?, vehicle: VehiclePosition?, now: Long) {
+private fun RideStep(
+    leg: LegView.Ride,
+    liveDep: Long?,
+    liveArr: Long?,
+    vehicle: VehiclePosition?,
+    now: Long,
+    current: Boolean = false,
+) {
     val liveColor = LiveTheme.colors.live
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        StepIcon(BusIcon)
+        StepIcon(BusIcon, current = current)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

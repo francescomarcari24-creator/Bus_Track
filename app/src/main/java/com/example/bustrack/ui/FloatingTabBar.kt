@@ -294,19 +294,37 @@ fun PillButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    RoundButton(onClick = onClick, modifier = modifier) {
+        androidx.compose.material3.Icon(icon, contentDescription, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Tasto tondo dell'app (impostazioni, preferenze, stella, aggiorna, mappa, orari...): alto come le
+ * pillole, colore e ombra della barra in basso. Il contenuto (di solito un'icona) sta al centro.
+ */
+@Composable
+fun RoundButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.size(BarHeight),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shadowElevation = 8.dp,
         tonalElevation = 3.dp,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            androidx.compose.material3.Icon(icon, contentDescription, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Box(contentAlignment = Alignment.Center) { content() }
     }
 }
+
+/** Spazio tra tasti tondi affiancati. */
+val RoundButtonGap = 8.dp
 
 /**
  * Contenuto della pillola: indicatore e sezioni. Si tocca una sezione oppure si trascina

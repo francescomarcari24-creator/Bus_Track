@@ -98,17 +98,19 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             }
             Spacer(Modifier.weight(1f))
             val showOnMap = LocalShowLineOnMap.current
-            IconButton(onClick = { showOnMap(line.route.label, line.pattern.directionId, line.pattern.headsign) }) {
-                Icon(painterResource(R.drawable.ic_map), contentDescription = "Mostra la linea sulla mappa")
+            // Tasti tondi come quelli delle impostazioni e delle preferenze, con spazi uguali.
+            RoundIconButton(R.drawable.ic_map, "Mostra la linea sulla mappa") {
+                showOnMap(line.route.label, line.pattern.directionId, line.pattern.headsign)
             }
-            IconButton(onClick = vm::openTimetable) {
-                Icon(painterResource(R.drawable.ic_schedule), contentDescription = "Orari di partenza dal capolinea")
-            }
+            Spacer(Modifier.width(RoundButtonGap))
+            RoundIconButton(R.drawable.ic_schedule, "Orari di partenza dal capolinea", vm::openTimetable)
+            Spacer(Modifier.width(RoundButtonGap))
             val favorites by vm.favoriteItems.collectAsStateWithLifecycle()
             FavoriteButton(Favorite.LineFav(line.route.id, line.pattern.directionId) in favorites) {
                 vm.toggleFavoriteLine(line.route, line.pattern)
             }
-            RefreshButton(TransitViewModel.REFRESH_LINE in refreshing, vm::refreshLine)
+            Spacer(Modifier.width(RoundButtonGap))
+            RefreshButton(TransitViewModel.REFRESH_LINE in refreshing, onClick = vm::refreshLine)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             RouteBadge(line.route.label)

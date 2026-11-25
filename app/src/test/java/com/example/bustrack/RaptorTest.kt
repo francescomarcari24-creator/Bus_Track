@@ -133,3 +133,17 @@ class WalkInstructionsTest {
         ), ins.map { it.text })
     }
 }
+
+class NavTrackingTest {
+    @Test
+    fun projectionGivesDistanceAndProgress() {
+        // Tratto verso est di ~166 m (0,002° di longitudine a 41,9° N); punto 50 m a nord di metà strada.
+        val p = com.example.bustrack.ui.projectOnPolyline(
+            41.90045, 12.501,
+            doubleArrayOf(41.9, 41.9), doubleArrayOf(12.5, 12.502),
+        )
+        assertEquals(50.0, p.distance, 2.0)
+        assertEquals(p.length / 2, p.along, 2.0)
+        assertEquals(165.8, p.length, 2.0)
+    }
+}
