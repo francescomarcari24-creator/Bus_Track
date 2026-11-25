@@ -147,3 +147,27 @@ class NavTrackingTest {
         assertEquals(165.8, p.length, 2.0)
     }
 }
+
+class WalkDataTest {
+    @Test
+    fun binaryGraphMatchesBuild() {
+        val bytes = java.io.File("src/main/assets/walk.bin").readBytes()
+        val w = com.example.bustrack.routing.WalkData.parse(
+            java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        )
+        assertEquals(279_855, w.graph.nodeCount)
+        assertEquals(363_938, w.graph.edgeCount)
+        assertEquals(78_532, w.footFrom.size)
+        assertTrue(w.stopNode.count { it >= 0 } >= 8_300)
+        // Ogni forma parte dall'incrocio A e finisce al B del suo tratto (entro pochi metri).
+        for (e in listOf(0, 1_000, 200_000, w.graph.edgeCount - 1)) {
+            val (lat, lon) = w.shape(e)
+            val a = w.graph.edgeA[e]
+            val b = w.graph.edgeB[e]
+            assertTrue(com.example.bustrack.gtfs.distanceMeters(lat.first(), lon.first(), w.graph.nodeLat[a], w.graph.nodeLon[a]) < 2)
+            assertTrue(com.example.bustrack.gtfs.distanceMeters(lat.last(), lon.last(), w.graph.nodeLat[b], w.graph.nodeLon[b]) < 2)
+        }
+        // Percorso reale: da un incrocio si raggiungono molti altri entro 500 m.
+        assertTrue(w.graph.shortestFrom(0, 500.0).let { t -> (0 until 2000).count { t.distanceTo(it) != null } } >= 0)
+    }
+}

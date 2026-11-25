@@ -3,6 +3,8 @@ package com.example.bustrack.routing
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import java.io.BufferedOutputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.time.LocalDate
 
@@ -11,83 +13,14 @@ const val WALK_SPEED_MPS = 1.25
 
 private const val TAG = "BusTrack"
 
-/** Database del grafo pedonale (asset walk.db, da tools/build_walk_graph.py), installato come gtfs.db. */
-object WalkDatabase {
-    private const val ASSET = "walk.db"
-    @Volatile private var db: SQLiteDatabase? = null
-
-    fun open(context: Context): SQLiteDatabase = db ?: synchronized(this) {
-        db ?: run {
-            val file = File(context.noBackupFilesDir, ASSET)
-            val appUpdatedAt = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-            if (!file.exists() || file.lastModified() < appUpdatedAt) {
-                val tmp = File(file.path + ".tmp")
-                context.assets.open(ASSET).use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                check(tmp.renameTo(file) || (file.delete() && tmp.renameTo(file))) { "Impossibile installare $ASSET" }
-            }
-            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS)
-                .also { db = it }
-        }
-    }
-}
-
-/** Carica in memoria il grafo pedonale (senza le forme dei tratti, lette solo quando servono). */
-object WalkGraphLoader {
-    fun load(db: SQLiteDatabase): WalkGraph {
-        val started = System.nanoTime()
-        val nodeCount = db.rawQuery("SELECT COUNT(*) FROM nodes", null).use { it.moveToFirst(); it.getInt(0) }
-        val lat = DoubleArray(nodeCount)
-        val lon = DoubleArray(nodeCount)
-        db.rawQuery("SELECT id, lat, lon FROM nodes", null).use { c ->
-            while (c.moveToNext()) {
-                val i = c.getInt(0)
-                lat[i] = c.getDouble(1)
-                lon[i] = c.getDouble(2)
-            }
-        }
-        val edgeCount = db.rawQuery("SELECT COUNT(*) FROM edges", null).use { it.moveToFirst(); it.getInt(0) }
-        val a = IntArray(edgeCount)
-        val b = IntArray(edgeCount)
-        val len = FloatArray(edgeCount)
-        val name = IntArray(edgeCount)
-        val kind = ByteArray(edgeCount)
-        db.rawQuery("SELECT id, a, b, length, name_id, kind FROM edges", null).use { c ->
-            while (c.moveToNext()) {
-                val i = c.getInt(0)
-                a[i] = c.getInt(1)
-                b[i] = c.getInt(2)
-                len[i] = c.getFloat(3)
-                name[i] = c.getInt(4)
-                kind[i] = c.getInt(5).toByte()
-            }
-        }
-        val nameCount = db.rawQuery("SELECT MAX(id) + 1 FROM names", null).use { it.moveToFirst(); it.getInt(0) }
-        val names = Array(nameCount) { "" }
-        db.rawQuery("SELECT id, name FROM names", null).use { c -> while (c.moveToNext()) names[c.getInt(0)] = c.getString(1) }
-        Log.i(TAG, "Grafo pedonale: $nodeCount incroci, $edgeCount tratti in ${(System.nanoTime() - started) / 1_000_000} ms")
-        return WalkGraph(lat, lon, a, b, len, name, kind, names)
-    }
-
-    /** Forme (polilinee codificate) dei tratti indicati. */
-    fun shapes(db: SQLiteDatabase, edges: Collection<Int>): Map<Int, String> = buildMap {
-        edges.distinct().chunked(500).forEach { chunk ->
-            db.rawQuery(
-                "SELECT id, geom FROM edges WHERE id IN (${chunk.joinToString(",")})", null,
-            ).use { c -> while (c.moveToNext()) put(c.getInt(0), c.getString(1)) }
-        }
-    }
-}
-
-/** Incrocio della rete più vicino a ogni fermata (tabella stop_nodes del grafo), negli indici di [day]. */
-fun loadStopNodes(walk: SQLiteDatabase, day: DayTimetable): Pair<IntArray, DoubleArray> {
+/** Incrocio della rete più vicino a ogni fermata, negli indici di [day] (-1 se nessuno), e distanza. */
+fun stopNodes(walk: WalkData, day: DayTimetable): Pair<IntArray, DoubleArray> {
     val node = IntArray(day.stopIds.size) { -1 }
     val gap = DoubleArray(day.stopIds.size)
-    walk.rawQuery("SELECT stop_id, node, gap_m FROM stop_nodes", null).use { c ->
-        while (c.moveToNext()) {
-            val i = day.stopIndex[c.getString(0)] ?: continue
-            node[i] = c.getInt(1)
-            gap[i] = c.getDouble(2)
-        }
+    walk.stopIds.forEachIndexed { k, id ->
+        val i = day.stopIndex[id] ?: return@forEachIndexed
+        node[i] = walk.stopNode[k]
+        gap[i] = walk.stopGap[k].toDouble()
     }
     return node to gap
 }
@@ -113,12 +46,12 @@ class DayTimetable(
 
 /** Costruisce gli orari del giorno dal database GTFS e i cambi a piedi dal grafo pedonale. */
 object TimetableLoader {
-    fun load(gtfs: SQLiteDatabase, walk: SQLiteDatabase, date: LocalDate): DayTimetable {
+    fun load(gtfs: SQLiteDatabase, walk: WalkData, date: LocalDate): DayTimetable {
         val started = System.nanoTime()
         val stopIds = gtfs.rawQuery("SELECT stop_id FROM stops", null).use { c ->
             buildList { while (c.moveToNext()) add(c.getString(0)) }
         }.toTypedArray()
-        val stopIndex = HashMap<String, Int>(stopIds.size * 2).apply { stopIds.forEachIndexed { i, s -> put(s, i) } }
+        val stopIndex = indexOf(stopIds)
 
         // Profili: sequenza di fermate e tempi relativi.
         val profStops = HashMap<Int, IntArray>()
@@ -196,12 +129,10 @@ object TimetableLoader {
 
         // Cambi a piedi reali dal grafo pedonale.
         val footLists = Array(stopIds.size) { ArrayList<Pair<Int, Int>>(4) }
-        walk.rawQuery("SELECT from_stop, to_stop, meters FROM footpaths", null).use { c ->
-            while (c.moveToNext()) {
-                val f = stopIndex[c.getString(0)] ?: continue
-                val t = stopIndex[c.getString(1)] ?: continue
-                footLists[f] += t to (c.getInt(2) / WALK_SPEED_MPS).toInt()
-            }
+        for (k in walk.footFrom.indices) {
+            val f = stopIndex[walk.stopIds[walk.footFrom[k]]] ?: continue
+            val t = stopIndex[walk.stopIds[walk.footTo[k]]] ?: continue
+            footLists[f] += t to (walk.footMeters[k] / WALK_SPEED_MPS).toInt()
         }
         val footStart = IntArray(stopIds.size + 1)
         for (s in stopIds.indices) footStart[s + 1] = footStart[s] + footLists[s].size
@@ -222,5 +153,89 @@ object TimetableLoader {
         val tt = Timetable(stopIds.size, routeStopStart, routeStops, routeOffsets, routeTripStart, tripStart, tripRef, footStart, footTo, footSec)
         Log.i(TAG, "Orari di $date: ${routeIds.size} percorsi, ${tripStart.size} corse in ${(System.nanoTime() - started) / 1_000_000} ms")
         return DayTimetable(date, tt, stopIds, stopIndex, tripInfos.toTypedArray(), routeType)
+    }
+
+    internal fun indexOf(stopIds: Array<String>): Map<String, Int> =
+        HashMap<String, Int>(stopIds.size * 2).apply { stopIds.forEachIndexed { i, s -> put(s, i) } }
+}
+
+/**
+ * Orari del giorno già pronti, salvati in un file alla prima preparazione: per il resto della
+ * giornata il motore si prepara in una frazione di secondo invece di rileggere tutto il GTFS.
+ * Il nome del file contiene giorno e versione dei dati (GTFS e grafo): se cambiano si ricostruisce.
+ */
+object TimetableCache {
+    private const val FORMAT = 2
+    private const val PREFIX = "timetable-"
+
+    private fun file(context: Context, date: LocalDate, dataKey: String) =
+        File(context.cacheDir, "$PREFIX$date-${dataKey.hashCode().toUInt()}-v$FORMAT.bin")
+
+    fun load(context: Context, date: LocalDate, dataKey: String): DayTimetable? {
+        val f = file(context, date, dataKey)
+        if (!f.exists()) return null
+        return runCatching {
+            // Tutto il file in memoria e letto a blocchi: molto più veloce che numero per numero.
+            read(java.nio.ByteBuffer.wrap(f.readBytes()), date)
+        }.onFailure { Log.e(TAG, "Orari salvati illeggibili", it); f.delete() }.getOrNull()
+    }
+
+    fun save(context: Context, day: DayTimetable, dataKey: String) {
+        val f = file(context, day.date, dataKey)
+        // Si tengono solo gli orari di oggi.
+        context.cacheDir.listFiles { x -> x.name.startsWith(PREFIX) && x.name != f.name }?.forEach { it.delete() }
+        val tmp = File(f.path + ".tmp")
+        runCatching {
+            DataOutputStream(BufferedOutputStream(tmp.outputStream(), 1 shl 16)).use { write(it, day) }
+            check(tmp.renameTo(f))
+        }.onFailure { Log.e(TAG, "Salvataggio degli orari", it); tmp.delete() }
+    }
+
+    private fun write(o: DataOutputStream, d: DayTimetable) {
+        fun ints(a: IntArray) {
+            o.writeInt(a.size)
+            val buf = java.nio.ByteBuffer.allocate(4 * a.size)
+            buf.asIntBuffer().put(a)
+            o.write(buf.array())
+        }
+        fun str(s: String) {
+            val bytes = s.toByteArray(Charsets.UTF_8)
+            o.writeShort(bytes.size)
+            o.write(bytes)
+        }
+        val t = d.timetable
+        o.writeInt(d.stopIds.size); d.stopIds.forEach(::str)
+        ints(t.routeStopStart); ints(t.routeStops); ints(t.routeOffsets)
+        ints(t.routeTripStart); ints(t.tripStart); ints(t.tripRef)
+        ints(t.footStart); ints(t.footTo); ints(t.footSec)
+        ints(d.routeType)
+        o.writeInt(d.trips.size)
+        d.trips.forEach { tr ->
+            str(tr.tripId); str(tr.routeId); str(tr.headsign ?: ""); str(tr.serviceId ?: "")
+        }
+    }
+
+    private fun read(b: java.nio.ByteBuffer, date: LocalDate): DayTimetable {
+        fun ints(): IntArray {
+            val n = b.int
+            return IntArray(n).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * n) }
+        }
+        val raw = b.array()
+        fun str(): String {
+            val len = b.short.toInt() and 0xFFFF
+            val s = String(raw, b.position(), len, Charsets.UTF_8)
+            b.position(b.position() + len)
+            return s
+        }
+        val stopIds = Array(b.int) { str() }
+        val routeStopStart = ints(); val routeStops = ints(); val routeOffsets = ints()
+        val routeTripStart = ints(); val tripStart = ints(); val tripRef = ints()
+        val footStart = ints(); val footTo = ints(); val footSec = ints()
+        val routeType = ints()
+        val trips = Array(b.int) {
+            TripInfo(str(), str(), str().ifEmpty { null }, str().ifEmpty { null })
+        }
+        val tt = Timetable(stopIds.size, routeStopStart, routeStops, routeOffsets, routeTripStart, tripStart, tripRef, footStart, footTo, footSec)
+        return DayTimetable(date, tt, stopIds, TimetableLoader.indexOf(stopIds), trips, routeType)
     }
 }

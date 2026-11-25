@@ -107,6 +107,9 @@ internal val LocalTabBack = staticCompositionLocalOf<() -> Unit> { {} }
 /** Apre la pagina di una fermata nella scheda Home (usato dalla mappa delle fermate). */
 internal val LocalOpenStop = staticCompositionLocalOf<(Stop) -> Unit> { {} }
 
+/** Apre la scheda Mappa per scegliere la meta tenendo premuto un punto. */
+internal val LocalPickOnMap = staticCompositionLocalOf<() -> Unit> { {} }
+
 /** Naviga fino a un luogo: apre la scheda Nav con l'arrivo impostato e i percorsi calcolati. */
 internal val LocalNavigateTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
 
@@ -242,6 +245,14 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             openTab(Tabs.ROUTE)
         }
     }
+    // Scelta della meta sulla mappa: mappa generale con l'indicazione "tieni premuto".
+    val pickOnMap = remember(vm) {
+        {
+            scrollMemory.resetMap()
+            scrollMemory.mapPickHint = true
+            openTab(Tabs.MAP)
+        }
+    }
     // Navigazione in corso (avviata ora o ripresa dopo una chiusura dell'app): il servizio della
     // navigazione segue la posizione anche ad app chiusa e tiene la notifica col prossimo passo.
     val navActive = vm.navigation.state.collectAsStateWithLifecycle().value.active != null
@@ -285,6 +296,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         LocalShowLineOnMap provides showLineOnMap,
         LocalTabBack provides tabBack,
         LocalNavigateTo provides navigateTo,
+        LocalPickOnMap provides pickOnMap,
     ) {
         // Solo la barra di stato in alto: in basso il contenuto arriva fino al bordo
         // e la barra flottante gli sta sopra.
@@ -315,6 +327,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                         // "Avvisi" all'elenco completo (senza la ricerca per linea).
                         if (i == Tabs.HOME) vm.goToStopsHome()
                         if (i == Tabs.MAP) scrollMemory.resetMap()
+                        if (i != Tabs.MAP) scrollMemory.mapPickHint = false
                         if (i == Tabs.ALERTS) scrollMemory.alertsQuery = ""
                         // "Nav" dopo una ricerca riporta alla pagina iniziale della scheda (campi vuoti,
                         // niente percorsi); una navigazione in corso resta.
@@ -1028,6 +1041,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 lineShapes = if (navJourney != null) emptyList() else lineShapes,
                 highlightDirection = lineChoice?.directionId,
                 navigation = navMap,
+                describePoint = vm.navigation::describePoint,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },

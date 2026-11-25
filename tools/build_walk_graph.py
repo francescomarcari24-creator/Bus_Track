@@ -1,7 +1,8 @@
 """Costruisce il grafo pedonale di Roma (OpenStreetMap) per la navigazione a piedi dell'app.
 
 Uso (serve la libreria osmium: pip install osmium):
-    python tools/build_walk_graph.py <estratto.osm.pbf> app/src/main/assets/gtfs.db app/src/main/assets/walk.db
+    python tools/build_walk_graph.py <estratto.osm.pbf> app/src/main/assets/gtfs.db <tmp>/walk.db
+    python tools/walk_db_to_bin.py <tmp>/walk.db app/src/main/assets/walk.bin   (formato letto dall'app)
 
 - Strade: quelle percorribili a piedi nell'area delle fermate (piu' un margine), escluse
   autostrade/superstrade e i tratti vietati ai pedoni.

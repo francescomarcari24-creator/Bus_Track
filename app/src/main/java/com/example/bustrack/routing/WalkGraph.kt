@@ -9,7 +9,7 @@ import java.util.PriorityQueue
  * archi senza oggetti per elemento. La forma dei tratti non sta qui: si legge solo per i tratti
  * del percorso scelto (vedi [EdgeShapes]).
  *
- * Indipendente da Android: costruita da [WalkGraphLoader] sul telefono e a mano nei test.
+ * Indipendente da Android: costruita da [WalkData] sul telefono e a mano nei test.
  */
 class WalkGraph(
     val nodeLat: DoubleArray,

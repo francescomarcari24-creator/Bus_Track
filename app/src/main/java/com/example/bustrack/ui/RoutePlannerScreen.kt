@@ -165,6 +165,7 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
     val vehicles = (vm.vehicles.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
 
     var focused by remember { mutableStateOf<PlaceField?>(null) }
+    val pickOnMap = LocalPickOnMap.current
     // Notifica della navigazione: il permesso si chiede la prima volta che se ne avvia una.
     val context = androidx.compose.ui.platform.LocalContext.current
     val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -227,13 +228,17 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                 }
                 when {
                     active != null -> NavigationSteps(active, state.live, vehicles, state.progress, state.reroute)
-                    focused == PlaceField.FROM || (focused == PlaceField.TO && query.trim().length >= 2) ->
+                    focused != null ->
                         Suggestions(
                             field = focused!!,
-                            places = if (state.suggestField == focused) state.suggestions else emptyList(),
+                            places = if (state.suggestField == focused && query.trim().length >= 2) state.suggestions else emptyList(),
                             searching = state.searchingPlaces && query.trim().length >= 2,
                             showMyLocation = focused == PlaceField.FROM,
+                            queryBlank = query.trim().length < 2,
                             onPick = { place -> pick(focused!!, place) },
+                            onPickOnMap = if (focused == PlaceField.TO) {
+                                { focusManager.clearFocus(); pickOnMap() }
+                            } else null,
                         )
                     else -> PlanResults(
                         status = state.plan,
@@ -448,9 +453,17 @@ private fun Suggestions(
     places: List<Place>,
     searching: Boolean,
     showMyLocation: Boolean,
+    queryBlank: Boolean,
     onPick: (Place?) -> Unit,
+    /** "Scegli sulla mappa" (solo per la meta). */
+    onPickOnMap: (() -> Unit)?,
 ) {
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+        if (onPickOnMap != null) {
+            item(key = "map") {
+                SuggestionRow(Icons.Rounded.LocationOn, "Scegli sulla mappa", "Tieni premuto un punto della mappa", onPickOnMap)
+            }
+        }
         if (showMyLocation) {
             item(key = "me") {
                 SuggestionRow(MyLocationGlyph, "La tua posizione", "Parti da dove ti trovi") { onPick(null) }
@@ -469,7 +482,7 @@ private fun Suggestions(
                     Spinner(Modifier.size(24.dp), strokeWidth = 2.dp)
                 }
             }
-        } else if (places.isEmpty() && !showMyLocation) {
+        } else if (places.isEmpty() && !showMyLocation && !queryBlank) {
             item(key = "none") {
                 Text(
                     "Nessun luogo trovato.",

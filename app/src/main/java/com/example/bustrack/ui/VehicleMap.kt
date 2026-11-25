@@ -142,6 +142,10 @@ fun metroColor(label: String): Int? = when (label.uppercase()) {
 
 private fun hex(argb: Int) = "#%06X".format(0xFFFFFF and argb)
 
+/** Punto scelto tenendo premuto sulla mappa (meta della navigazione). */
+private const val PICK_SOURCE = "picked-point"
+private const val PICK_LAYER = "picked-point-circle"
+
 private val VEHICLE_LAYERS = listOf(CIRCLE_LAYER, ARROW_LAYER, LABEL_LAYER)
 private val STOP_LAYERS = listOf(
     STOP_CLUSTER_LAYER, STOP_COUNT_LAYER, STOP_POINT_LAYER, STOP_LABEL_LAYER, STOP_NEAR_LAYER, STOP_NEAR_LABEL_LAYER,
@@ -172,10 +176,13 @@ fun VehicleMap(
     modifier: Modifier = Modifier,
     /** Navigazione in corso: si disegna il suo percorso e la mappa lo inquadra. */
     navigation: NavMapData? = null,
+    /** Nome di un punto scelto tenendo premuto (indirizzo); null = la scelta non è disponibile. */
+    describePoint: (suspend (Double, Double) -> Place)? = null,
 ) {
     val context = LocalContext.current
     // Tutti i mezzi sulla mappa sono tracciati live: verde. Le fermate sono dati statici: colore tema.
     val dotColor = LiveTheme.colors.live.toArgb()
+    val pickColor = MaterialTheme.colorScheme.error.toArgb()
     val stopColor = MaterialTheme.colorScheme.primary.toArgb()
     val onStopColor = MaterialTheme.colorScheme.onPrimary.toArgb()
     val nearColor = MaterialTheme.colorScheme.tertiary.toArgb()
@@ -193,6 +200,8 @@ fun VehicleMap(
     // Il listener dei tocchi si registra una volta sola: legge sempre la modalità corrente.
     val showStopsNow by rememberUpdatedState(showStops)
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
+    var picked by remember { mutableStateOf<LatLng?>(null) }
+    val describePointNow by rememberUpdatedState(describePoint)
 
     // Posizione dell'utente: permesso chiesto una volta per sessione aprendo la mappa
     // (non nell'anteprima del gesto indietro) e di nuovo toccando il tasto "la mia posizione".
@@ -233,7 +242,21 @@ fun VehicleMap(
                 override fun onCameraTrackingDismissed() { following = false }
                 override fun onCameraTrackingChanged(currentMode: Int) { following = currentMode != CameraMode.NONE }
             })
+            // Tenendo premuto si sceglie un punto come meta (riquadro con "Naviga qui").
+            map.addOnMapLongClickListener { latLng ->
+                if (describePointNow == null) return@addOnMapLongClickListener false
+                selectedId = null
+                selectedStopId = null
+                picked = latLng
+                memory.mapPickHint = false
+                true
+            }
             map.addOnMapClickListener { latLng ->
+                // Un tocco altrove chiude il punto scelto.
+                if (picked != null) {
+                    picked = null
+                    return@addOnMapClickListener true
+                }
                 if (showStopsNow) {
                     val hit = map.stopFeatureAt(latLng)
                     when {
@@ -304,6 +327,16 @@ fun VehicleMap(
                     PropertyFactory.textHaloWidth(2f),
                     // Le etichette sovrapposte vengono nascoste: zoomando ricompaiono.
                     PropertyFactory.textAllowOverlap(false),
+                )
+            )
+            // Punto scelto: pallino rosso col bordo, sopra a tutto.
+            loaded.addSource(GeoJsonSource(PICK_SOURCE))
+            loaded.addLayer(
+                CircleLayer(PICK_LAYER, PICK_SOURCE).withProperties(
+                    PropertyFactory.circleRadius(9f),
+                    PropertyFactory.circleColor(pickColor),
+                    PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                    PropertyFactory.circleStrokeWidth(3f),
                 )
             )
             style = loaded
@@ -508,6 +541,18 @@ fun VehicleMap(
     }
 
     // Con una scheda aperta, la back gesture la chiude invece di cambiare schermata.
+    // Segnaposto del punto scelto.
+    LaunchedEffect(style, picked) {
+        val source = style?.getSourceAs<GeoJsonSource>(PICK_SOURCE) ?: return@LaunchedEffect
+        val p = picked
+        source.setGeoJson(
+            FeatureCollection.fromFeatures(
+                listOfNotNull(p?.let { Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)) })
+            )
+        )
+    }
+    BackHandler(enabled = picked != null && !inPreview) { picked = null }
+
     BackHandler(enabled = (selectedId != null || selectedStopId != null) && !inPreview) {
         selectedId = null
         selectedStopId = null
@@ -534,7 +579,24 @@ fun VehicleMap(
         }
         // Le schede stanno sopra la barra flottante.
         val cardModifier = Modifier.align(Alignment.BottomCenter).padding(12.dp).padding(bottom = LocalBottomBarInset.current)
-        if (showStops) {
+        // Indicazione mentre si sceglie la meta (aperta da "Scegli sulla mappa" nella scheda Nav).
+        if (memory.mapPickHint && picked == null) {
+            Card(
+                Modifier.align(Alignment.TopCenter).padding(start = 12.dp, end = 68.dp, top = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            ) {
+                Text(
+                    "Tieni premuto un punto della mappa per sceglierlo come meta",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+            }
+        }
+        val pickedPoint = picked
+        val describe = describePoint
+        if (pickedPoint != null && describe != null) {
+            PickedPointCard(pickedPoint, describe, onClose = { picked = null }, modifier = cardModifier)
+        } else if (showStops) {
             stops.firstOrNull { it.id == selectedStopId }?.let { StopCard(it, loadRoutes, onOpenStop, cardModifier) }
         } else {
             vehicles.firstOrNull { it.vehicleId == selectedId }?.let { VehicleCard(it, onOpenLine, cardModifier) }
@@ -804,6 +866,40 @@ private fun addStopLayers(style: Style, color: Int, onColor: Int, nearColor: Int
     )
     nearLabels.minZoom = 14f
     style.addLayer(nearLabels)
+}
+
+/** Punto scelto sulla mappa: indirizzo (cercato in sottofondo) e "Naviga qui". */
+@Composable
+private fun PickedPointCard(
+    point: LatLng,
+    describe: suspend (Double, Double) -> Place,
+    onClose: () -> Unit,
+    modifier: Modifier,
+) {
+    var place by remember(point) { mutableStateOf<Place?>(null) }
+    LaunchedEffect(point) { place = describe(point.latitude, point.longitude) }
+    val navigateTo = LocalNavigateTo.current
+    Card(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text(place?.name ?: "Cerco l'indirizzo…", style = MaterialTheme.typography.titleMedium)
+            Text(
+                place?.detail ?: "%.5f, %.5f".format(java.util.Locale.ITALY, point.latitude, point.longitude),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    navigateTo(
+                        place ?: Place("Punto sulla mappa", null, point.latitude, point.longitude, PlaceKind.ADDRESS)
+                    )
+                    onClose()
+                }) {
+                    Icon(DirectionsIcon, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
+                    Text("Naviga qui")
+                }
+                TextButton(onClick = onClose) { Text("Chiudi") }
+            }
+        }
+    }
 }
 
 @Composable

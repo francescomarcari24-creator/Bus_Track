@@ -17,6 +17,13 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Solo processori arm64 (praticamente tutti i telefoni con Android 14 e successivi): le
+        // librerie native della mappa per x86, x86_64 e armeabi-v7a pesavano ~36 MB in più.
+        // Niente emulatori x86 (non servono).
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {

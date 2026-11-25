@@ -7,9 +7,6 @@ import android.util.Log
 import com.example.bustrack.gtfs.GtfsStaticDb
 import com.example.bustrack.routing.JourneyLeg
 import com.example.bustrack.routing.RoutePlanner
-import com.example.bustrack.routing.TimetableLoader
-import com.example.bustrack.routing.WalkDatabase
-import com.example.bustrack.routing.WalkGraphLoader
 import java.time.LocalDate
 import java.time.ZoneId
 

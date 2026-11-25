@@ -14,8 +14,6 @@ import com.example.bustrack.routing.JourneyLeg
 import com.example.bustrack.routing.PlannedJourney
 import com.example.bustrack.routing.RoutePlanner
 import com.example.bustrack.routing.RoutingEngine
-import com.example.bustrack.routing.WalkDatabase
-import com.example.bustrack.routing.WalkGraphLoader
 import com.example.bustrack.routing.WalkInstruction
 import com.example.bustrack.routing.WalkInstructions
 import kotlinx.coroutines.CancellationException
@@ -454,9 +452,9 @@ class NavigationModel(
     private fun toView(j: PlannedJourney, origin: Place, dest: Place): JourneyView {
         val gtfs = GtfsStaticDb.shared(app)
         val graph = checkNotNull(RoutingEngine.walkGraph())
-        val walkDb = WalkDatabase.open(app)
+        val walk = checkNotNull(RoutingEngine.walkData())
         val edges = j.legs.filterIsInstance<JourneyLeg.Walk>().flatMap { w -> w.steps.map { it.edge } }
-        val shapes = WalkGraphLoader.shapes(walkDb, edges).mapValues { Polyline.decode(it.value) }
+        val shapes = edges.distinct().associateWith { walk.shape(it) }
         val legs = j.legs.map { leg ->
             when (leg) {
                 is JourneyLeg.Walk -> {
@@ -543,6 +541,28 @@ class NavigationModel(
     }
 
     // ---- Geocoder ----
+
+    /**
+     * Luogo per un punto scelto sulla mappa: indirizzo (o nome del luogo) dal geocoder di Android;
+     * se non risponde, "Punto sulla mappa" con le coordinate.
+     */
+    suspend fun describePoint(lat: Double, lon: Double): Place {
+        val fallback = Place("Punto sulla mappa", "%.5f, %.5f".format(Locale.ITALY, lat, lon), lat, lon, PlaceKind.ADDRESS)
+        if (!Geocoder.isPresent()) return fallback
+        val address = withTimeoutOrNull(6_000) {
+            suspendCancellableCoroutine<List<Address>> { cont ->
+                Geocoder(app, Locale.ITALY).getFromLocation(
+                    lat, lon, 1,
+                    object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<Address>) { if (cont.isActive) cont.resume(addresses) }
+                        override fun onError(errorMessage: String?) { if (cont.isActive) cont.resume(emptyList()) }
+                    },
+                )
+            }
+        }?.firstOrNull() ?: return fallback
+        // Le coordinate restano quelle toccate (l'indirizzo è solo il nome da mostrare).
+        return placeOf(address)?.copy(lat = lat, lon = lon) ?: fallback
+    }
 
     private suspend fun geocode(query: String): List<Place> {
         if (!Geocoder.isPresent()) return emptyList()

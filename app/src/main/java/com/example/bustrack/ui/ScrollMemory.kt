@@ -55,6 +55,9 @@ class ScrollMemory {
     /** Scheda Percorso: partenza e arrivo scritti. */
     var routeFrom by mutableStateOf("")
     var routeTo by mutableStateOf("")
+    /** Mappa aperta per scegliere la meta tenendo premuto (mostra l'indicazione). */
+    var mapPickHint by mutableStateOf(false)
+
     /** Navigazione di cui la mappa ha già inquadrato il percorso. */
     var navFittedKey: String? = null
     /** Campo della partenza aperto (altrimenti si parte dalla posizione attuale). */
