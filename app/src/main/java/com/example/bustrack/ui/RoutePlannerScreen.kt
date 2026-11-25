@@ -165,6 +165,11 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
     val vehicles = (vm.vehicles.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
 
     var focused by remember { mutableStateOf<PlaceField?>(null) }
+    // Notifica della navigazione: il permesso si chiede la prima volta che se ne avvia una.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
     val options by nav.options.collectAsStateWithLifecycle()
     var optionsOpen by remember { mutableStateOf(false) }
     val pick: (PlaceField, Place?) -> Unit = { field, place ->
@@ -237,6 +242,11 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                         onStart = { j ->
                             focusManager.clearFocus()
                             nav.startNavigation(j)
+                            if (context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                                android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) {
+                                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
                         },
                     )
                 }

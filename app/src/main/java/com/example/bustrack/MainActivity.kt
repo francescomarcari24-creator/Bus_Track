@@ -15,6 +15,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) intent?.getStringExtra(EXTRA_OPEN_STOP_ID)?.let { PendingStopOpen.stopId.value = it }
         // Aperta da una notifica di avviso: scheda Avvisi.
         if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_ALERTS, false) == true) PendingStopOpen.alerts.value = true
+        // Aperta dalla notifica della navigazione: scheda Nav.
+        if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_NAV, false) == true) PendingStopOpen.nav.value = true
         // Notifiche dei nuovi avvisi sulle linee e fermate preferite (se attive nelle impostazioni).
         if (com.example.bustrack.settings.AppSettings.get(this).favoriteAlerts.value) {
             com.example.bustrack.watch.FavoriteAlertsWorker.schedule(this)
@@ -39,6 +41,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_OPEN_STOP_ID)?.let { PendingStopOpen.stopId.value = it }
         if (intent.getBooleanExtra(EXTRA_OPEN_ALERTS, false)) PendingStopOpen.alerts.value = true
+        if (intent.getBooleanExtra(EXTRA_OPEN_NAV, false)) PendingStopOpen.nav.value = true
     }
 
     companion object {
@@ -46,6 +49,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_STOP_ID = "open_stop_id"
         /** Apre la scheda Avvisi (dalle notifiche degli avvisi sui preferiti). */
         const val EXTRA_OPEN_ALERTS = "open_alerts"
+        /** Apre la scheda Nav (dalla notifica della navigazione). */
+        const val EXTRA_OPEN_NAV = "open_nav"
     }
 }
 
@@ -53,4 +58,5 @@ class MainActivity : ComponentActivity() {
 object PendingStopOpen {
     val stopId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val alerts = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val nav = kotlinx.coroutines.flow.MutableStateFlow(false)
 }

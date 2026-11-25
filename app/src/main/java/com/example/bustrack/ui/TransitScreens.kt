@@ -242,14 +242,19 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             openTab(Tabs.ROUTE)
         }
     }
-    // Navigazione in corso e app in primo piano: si segue la posizione (tratto in corso, ricalcolo
-    // se si esce dal percorso o si perde il mezzo), in qualunque scheda ci si trovi.
+    // Navigazione in corso (avviata ora o ripresa dopo una chiusura dell'app): il servizio della
+    // navigazione segue la posizione anche ad app chiusa e tiene la notifica col prossimo passo.
     val navActive = vm.navigation.state.collectAsStateWithLifecycle().value.active != null
-    val appLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val appContext = LocalContext.current
     LaunchedEffect(navActive) {
-        if (navActive) {
-            appLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { vm.navigation.track() }
-        }
+        if (navActive) com.example.bustrack.navigation.NavigationService.start(appContext)
+    }
+    // Tocco sulla notifica della navigazione: scheda Nav.
+    val pendingNav by com.example.bustrack.PendingStopOpen.nav.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingNav) {
+        if (!pendingNav) return@LaunchedEffect
+        com.example.bustrack.PendingStopOpen.nav.value = false
+        openTab(Tabs.ROUTE)
     }
     // Indietro di una scheda (usato dal gesto e dal pulsante "← Mappa" di una fermata aperta dalla mappa).
     val tabBack = remember(vm) {
@@ -311,6 +316,14 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                         if (i == Tabs.HOME) vm.goToStopsHome()
                         if (i == Tabs.MAP) scrollMemory.resetMap()
                         if (i == Tabs.ALERTS) scrollMemory.alertsQuery = ""
+                        // "Nav" dopo una ricerca riporta alla pagina iniziale della scheda (campi vuoti,
+                        // niente percorsi); una navigazione in corso resta.
+                        if (i == Tabs.ROUTE && vm.navigation.state.value.active == null) {
+                            scrollMemory.routeTo = ""
+                            scrollMemory.routeFrom = ""
+                            scrollMemory.routeFromOpen = false
+                            vm.navigation.resetSearch()
+                        }
                         openTab(i)
                     },
                     position = tabPosition,

@@ -823,7 +823,17 @@ private fun StopCard(stop: Stop, loadRoutes: suspend (Stop) -> List<Route>, onOp
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            TextButton(onClick = { onOpen(stop) }) { Text("Apri fermata e arrivi →") }
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { onOpen(stop) }) { Text("Apri fermata e arrivi →") }
+                // Navigazione fino a questa fermata (scheda Nav con i percorsi già calcolati).
+                val navigateTo = LocalNavigateTo.current
+                TextButton(onClick = {
+                    navigateTo(Place(stop.name, "Palina ${stop.code ?: stop.id}", stop.lat, stop.lon, PlaceKind.STOP))
+                }) {
+                    Icon(DirectionsIcon, contentDescription = null, modifier = androidx.compose.ui.Modifier.padding(end = 6.dp))
+                    Text("Naviga")
+                }
+            }
         }
     }
 }

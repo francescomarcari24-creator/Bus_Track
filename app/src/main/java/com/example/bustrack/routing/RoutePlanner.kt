@@ -29,6 +29,8 @@ sealed interface JourneyLeg {
         val stopCount: Int,
         /** Fermate percorse, da quella di salita a quella di discesa comprese. */
         val stopIds: List<String>,
+        /** Orario (epoch secondi) a ognuna di [stopIds]. */
+        val stopTimes: List<Long> = emptyList(),
     ) : JourneyLeg
 }
 
@@ -229,6 +231,9 @@ class RoutePlanner(
                         toStopId = day.stopIds[leg.toStop],
                         stopCount = leg.alightPos - leg.boardPos,
                         stopIds = (leg.boardPos..leg.alightPos).map { day.stopIds[tt.stopAt(leg.route, it)] },
+                        stopTimes = (leg.boardPos..leg.alightPos).map {
+                            dayStartEpoch + tt.tripStart[leg.trip] + tt.offsetAt(leg.route, it)
+                        },
                     )
                 }
                 is RaptorLeg.Transfer -> {

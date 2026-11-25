@@ -75,6 +75,9 @@ sealed interface LegView {
         val stopCount: Int,
         val lat: DoubleArray,
         val lon: DoubleArray,
+        /** Tutte le fermate del tratto, dalla salita alla discesa, e i loro orari (epoch secondi). */
+        val stops: List<Stop> = listOf(from, to),
+        val stopTimes: LongArray = longArrayOf(departure, arrival),
     ) : LegView
 }
 
@@ -114,10 +117,15 @@ data class NavigationState(
     val progress: NavProgress? = null,
     /** Ultimo ricalcolo automatico del percorso durante il viaggio. */
     val reroute: RerouteNotice? = null,
+    /** Fermata presso cui si trova il mezzo di ogni corsa della navigazione (trip_id → nome), dal feed. */
+    val vehicleAt: Map<String, String> = emptyMap(),
 )
 
-/** Tratto in corso ([leg], indice in [JourneyView.legs]) e, se a piedi, metri che mancano alla sua fine. */
-data class NavProgress(val leg: Int, val remainingMeters: Int?)
+/**
+ * Tratto in corso ([leg], indice in [JourneyView.legs]); se a piedi, metri che mancano alla sua fine;
+ * se in mezzo, indice in [LegView.Ride.stops] della fermata più vicina (non si torna indietro).
+ */
+data class NavProgress(val leg: Int, val remainingMeters: Int?, val rideStop: Int? = null)
 
 /** Percorso ricalcolato alle [at] (epoch secondi) per il motivo [reason]. */
 data class RerouteNotice(val at: Long, val reason: String)
@@ -148,8 +156,37 @@ class NavigationModel(
         }
     }
 
-    private val _state = MutableStateFlow(NavigationState())
+    private val _state = MutableStateFlow(NavigationState(active = ActiveJourneyStore.load(app)))
     val state: StateFlow<NavigationState> = _state
+
+    init {
+        // La navigazione in corso si salva su disco a ogni cambio (avvio, ricalcolo, fine): se il
+        // sistema chiude l'app, riaprendola si riprende da dove si era.
+        scope.launch {
+            var saved = _state.value.active
+            _state.collect { s ->
+                if (s.active !== saved) {
+                    saved = s.active
+                    withContext(Dispatchers.IO) { ActiveJourneyStore.save(app, s.active) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Torna alla pagina iniziale della scheda Nav (tasto "Nav" della barra): toglie arrivo,
+     * partenza scelta, percorsi e suggerimenti. Una navigazione in corso resta.
+     */
+    fun resetSearch() {
+        suggestJob?.cancel()
+        planJob?.cancel()
+        _state.update {
+            it.copy(
+                origin = null, destination = null, plan = PlanStatus.Idle,
+                suggestions = emptyList(), suggestField = null, searchingPlaces = false,
+            )
+        }
+    }
 
     /** Ultimi luoghi scelti (pannello "Ricerche recenti" dei campi). */
     val recents = NavRecents.get(app)
@@ -308,10 +345,13 @@ class NavigationModel(
         app.locationUpdates().collect(::onLocation)
     }
 
-    private fun onLocation(loc: Location) {
+    /** Nuova posizione (dal servizio della navigazione). */
+    fun onLocation(loc: Location) {
         val journey = _state.value.active ?: return
         val accuracy = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 30.0
-        if (accuracy > 80) return // posizione troppo imprecisa per decidere qualcosa
+        // Al chiuso la precisione è spesso scarsa: fino a 200 m serve per seguire il passo in corso,
+        // ma per ricalcolare il percorso (sotto) serve una posizione entro 50 m.
+        if (accuracy > 200) return
         val now = System.currentTimeMillis() / 1000
         // Tratto in corso: il più vicino tra quello attuale e i due successivi (non si torna indietro,
         // e non si salta lontano solo perché la strada incrocia un tratto di molto dopo).
@@ -324,11 +364,25 @@ class NavigationModel(
         }
         val current = journey.legs[leg]
         val remaining = if (current is LegView.Walk) (proj.length - proj.along).coerceAtLeast(0.0).toInt() else null
-        _state.update { if (it.active === journey) it.copy(progress = NavProgress(leg, remaining)) else it }
+        val rideStop = (current as? LegView.Ride)?.let { r ->
+            val start = _state.value.progress?.takeIf { it.leg == leg }?.rideStop ?: 0
+            var best = start
+            var bestD = Double.MAX_VALUE
+            for (k in start until r.stops.size) {
+                val d = distanceMeters(loc.latitude, loc.longitude, r.stops[k].lat, r.stops[k].lon)
+                if (d < bestD) { bestD = d; best = k }
+            }
+            best
+        }
+        _state.update { if (it.active === journey) it.copy(progress = NavProgress(leg, remaining, rideStop)) else it }
 
         // Fuori strada: a piedi e lontani dal percorso per due posizioni di fila.
         val tolerance = maxOf(50.0, accuracy * 1.5)
-        offRouteFixes = if (current is LegView.Walk && proj.distance > tolerance) offRouteFixes + 1 else 0
+        offRouteFixes = when {
+            accuracy > 50 -> offRouteFixes // troppo imprecisa per dire che si è fuori strada
+            current is LegView.Walk && proj.distance > tolerance -> offRouteFixes + 1
+            else -> 0
+        }
         // Mezzo perso: è partito (orario live se c'è) da più di un minuto e mezzo e si è ancora a piedi
         // o fermi alla palina di salita.
         val ride = when {
@@ -386,7 +440,12 @@ class NavigationModel(
             .map { "${it.tripId}|${it.stopId}" to it.time }
             .filter { it.first in wanted }
             .toMap()
-        _state.update { if (it.active === journey) it.copy(live = live) else it }
+        val trips = rides.mapTo(HashSet()) { it.tripId }
+        val vehicleAt = runCatching { repo.vehiclePositions() }.getOrNull()?.items.orEmpty()
+            .filter { it.tripId in trips }
+            .mapNotNull { v -> v.currentStopName?.let { v.tripId!! to it } }
+            .toMap()
+        _state.update { if (it.active === journey) it.copy(live = live, vehicleAt = vehicleAt) else it }
         return snapshot.feedTimestamp
     }
 
@@ -429,10 +488,16 @@ class NavigationModel(
                     val from = checkNotNull(gtfs.stop(leg.fromStopId))
                     val to = checkNotNull(gtfs.stop(leg.toStopId))
                     val (lat, lon) = rideShape(gtfs, leg)
+                    val stops = leg.stopIds.indices.mapNotNull { k ->
+                        gtfs.stop(leg.stopIds[k])?.let { it to (leg.stopTimes.getOrNull(k) ?: leg.departure) }
+                    }
                     LegView.Ride(
                         leg.departure, leg.arrival, leg.tripId, leg.routeId,
                         gtfs.route(leg.routeId)?.label ?: leg.routeId, leg.headsign,
                         from, to, leg.stopCount, lat, lon,
+                        stops = stops.map { it.first }.ifEmpty { listOf(from, to) },
+                        stopTimes = if (stops.isEmpty()) longArrayOf(leg.departure, leg.arrival)
+                        else LongArray(stops.size) { stops[it].second },
                     )
                 }
             }
@@ -526,7 +591,21 @@ class NavigationModel(
         area.removePrefix("Città Metropolitana di ").removePrefix("Città metropolitana di ")
             .removePrefix("Provincia di ").removeSuffix(" Capitale").trim()
 
-    private companion object {
-        const val TAG = "BusTrack"
+    companion object {
+        private const val TAG = "BusTrack"
+
+        @Volatile private var instance: NavigationModel? = null
+
+        /**
+         * Modello unico per tutta l'app: lo usano le schermate e il servizio della navigazione
+         * (notifica e posizione anche ad app chiusa).
+         */
+        fun get(app: Application): NavigationModel = instance ?: synchronized(this) {
+            instance ?: NavigationModel(
+                app,
+                CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate),
+                TransitRepository(app),
+            ).also { instance = it }
+        }
     }
 }
