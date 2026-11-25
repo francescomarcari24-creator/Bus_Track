@@ -260,6 +260,18 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     LaunchedEffect(navActive) {
         if (navActive) com.example.bustrack.navigation.NavigationService.start(appContext)
     }
+    // Scorciatoia dell'icona "Vai a casa" / "Vai a lavoro": percorsi verso quel luogo (se ancora impostato).
+    val pendingNavTo by com.example.bustrack.PendingStopOpen.navTo.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingNavTo) {
+        val which = pendingNavTo ?: return@LaunchedEffect
+        com.example.bustrack.PendingStopOpen.navTo.value = null
+        val settings = com.example.bustrack.settings.AppSettings.get(appContext)
+        val home = which == com.example.bustrack.navigation.NavShortcuts.HOME
+        val place = (if (home) settings.homePlace.value else settings.workPlace.value)
+            ?.let { it.copy(name = if (home) "Casa" else "Lavoro", detail = it.name, kind = if (home) PlaceKind.HOME else PlaceKind.WORK) }
+        com.example.bustrack.navigation.NavShortcuts.reportUsed(appContext, which)
+        if (place != null) navigateTo(place) else openTab(Tabs.ROUTE)
+    }
     // Tocco sulla notifica della navigazione: scheda Nav.
     val pendingNav by com.example.bustrack.PendingStopOpen.nav.collectAsStateWithLifecycle()
     LaunchedEffect(pendingNav) {
@@ -533,6 +545,11 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             // vedi refreshNearby); il permesso si chiede solo su azione dell'utente.
             val inPreview = LocalInBackPreview.current
             LaunchedEffect(showNearby, inPreview) { if (showNearby && !inPreview) vm.refreshNearby() }
+            // Casa e Lavoro (pillole sopra le linee preferite): si ricontrolla dove si è a ogni ritorno sulla Home.
+            val homeOnScreen = LocalTabOnScreen.current
+            LaunchedEffect(homeOnScreen, inPreview) { if (homeOnScreen && !inPreview) vm.navigation.refreshShortcuts() }
+            val navShortcuts by vm.navigation.shortcuts.collectAsStateWithLifecycle()
+            val navigateTo = LocalNavigateTo.current
             // Pillola "Preferiti / Vicine": stesso aspetto e comportamento della barra in basso
             // (si tocca o si trascina l'indicatore, e l'elenco sotto scorre insieme a lui).
             val selectHome = { i: Int ->
@@ -647,6 +664,15 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                                         onOpenStop = vm::selectStop,
                                     )
                                 } else {
+                                    if (navShortcuts.isNotEmpty()) {
+                                        item(key = "nav-shortcuts") {
+                                            NavShortcutPills(
+                                                navShortcuts,
+                                                onPick = navigateTo,
+                                                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                                            )
+                                        }
+                                    }
                                     favoritesSection(favorites, vm)
                                 }
                             }

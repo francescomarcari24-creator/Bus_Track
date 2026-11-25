@@ -61,6 +61,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material3.Icon
@@ -152,7 +155,16 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
     val active = state.active
 
     // Grafo e orari si caricano appena si apre la scheda: la prima ricerca è poi immediata.
-    LaunchedEffect(onScreen) { if (onScreen) nav.prepareEngine() }
+    LaunchedEffect(onScreen) {
+        if (onScreen) {
+            nav.prepareEngine()
+            // Avvisi di servizio per i percorsi e Casa/Lavoro secondo la posizione attuale.
+            vm.ensureAlerts()
+            nav.refreshShortcuts()
+        }
+    }
+    val alerts = (vm.alerts.collectAsStateWithLifecycle().value as? Load.Ready)?.value.orEmpty()
+    val shortcuts by nav.shortcuts.collectAsStateWithLifecycle()
     // Navigazione in corso e scheda visibile: orari live e posizioni dei mezzi a ogni nuovo feed.
     LaunchedEffect(active, onScreen, inPreview) {
         if (active == null || !onScreen || inPreview) return@LaunchedEffect
@@ -227,7 +239,9 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                     null -> ""
                 }
                 when {
-                    active != null -> NavigationSteps(active, state.live, vehicles, state.progress, state.reroute)
+                    active != null -> CompositionLocalProvider(LocalRouteAlerts provides alerts) {
+                        NavigationSteps(active, state.live, vehicles, state.progress, state.reroute)
+                    }
                     focused != null ->
                         Suggestions(
                             field = focused!!,
@@ -235,14 +249,17 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                             searching = state.searchingPlaces && query.trim().length >= 2,
                             showMyLocation = focused == PlaceField.FROM,
                             queryBlank = query.trim().length < 2,
+                            shortcuts = if (focused == PlaceField.TO) shortcuts else emptyList(),
                             onPick = { place -> pick(focused!!, place) },
                             onPickOnMap = if (focused == PlaceField.TO) {
                                 { focusManager.clearFocus(); pickOnMap() }
                             } else null,
                         )
-                    else -> PlanResults(
+                    else -> CompositionLocalProvider(LocalRouteAlerts provides alerts) { PlanResults(
                         status = state.plan,
                         hasDestination = state.destination != null,
+                        shortcuts = shortcuts,
+                        onPickShortcut = { place -> pick(PlaceField.TO, place) },
                         onReplan = nav::plan,
                         onStart = { j ->
                             focusManager.clearFocus()
@@ -253,7 +270,7 @@ fun RoutePlannerScreen(vm: TransitViewModel) {
                                 notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                             }
                         },
-                    )
+                    ) }
                 }
             }
         }
@@ -454,11 +471,16 @@ private fun Suggestions(
     searching: Boolean,
     showMyLocation: Boolean,
     queryBlank: Boolean,
+    /** Casa e Lavoro (se impostati e lontani più di 1 km): prime voci per la meta. */
+    shortcuts: List<Place>,
     onPick: (Place?) -> Unit,
     /** "Scegli sulla mappa" (solo per la meta). */
     onPickOnMap: (() -> Unit)?,
 ) {
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+        items(shortcuts, key = { "fav:${it.kind}" }) { p ->
+            SuggestionRow(placeIcon(p), p.name, p.detail) { onPick(p) }
+        }
         if (onPickOnMap != null) {
             item(key = "map") {
                 SuggestionRow(Icons.Rounded.LocationOn, "Scegli sulla mappa", "Tieni premuto un punto della mappa", onPickOnMap)
@@ -471,7 +493,7 @@ private fun Suggestions(
         }
         items(places, key = { "${it.kind}:${it.lat}:${it.lon}:${it.name}" }) { p ->
             SuggestionRow(
-                icon = if (p.kind == PlaceKind.STOP) BusIcon else Icons.Rounded.Place,
+                icon = placeIcon(p),
                 title = p.name,
                 detail = p.detail,
             ) { onPick(p) }
@@ -527,6 +549,8 @@ private fun SuggestionRow(icon: ImageVector, title: String, detail: String?, onC
 private fun PlanResults(
     status: PlanStatus,
     hasDestination: Boolean,
+    shortcuts: List<Place>,
+    onPickShortcut: (Place) -> Unit,
     onReplan: () -> Unit,
     onStart: (JourneyView) -> Unit,
 ) {
@@ -550,6 +574,7 @@ private fun PlanResults(
         }
     }
     when (status) {
+        // Casa e Lavoro stanno nella Home (pillole) e tra i suggerimenti della meta.
         PlanStatus.Idle -> message(
             if (hasDestination) "Calcolo dei percorsi…"
             else "Scrivi in basso dove vuoi andare: una fermata, un indirizzo o un luogo."
@@ -641,6 +666,24 @@ private fun JourneyCard(j: JourneyView, now: Long, onClick: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(8.dp))
+            // Avvisi di servizio sulle linee o paline del percorso.
+            val routeAlerts = j.legs.filterIsInstance<LegView.Ride>().flatMap { it.alerts(LocalRouteAlerts.current) }.distinctBy { it.id }
+            routeAlerts.firstOrNull()?.let { a ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
+                    Icon(
+                        Icons.Rounded.Warning, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        a.header + if (routeAlerts.size > 1) " (+${routeAlerts.size - 1} avvisi)" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             val parts = listOfNotNull(
                 "Parti " + relative(j.departure, now),
                 if (j.rides == 0) "solo a piedi" else when (j.rides) { 1 -> "1 mezzo"; else -> "${j.rides} mezzi" },
@@ -701,7 +744,7 @@ private fun NavRecentsPanel(
                 }
                 items.forEach { p ->
                     SuggestionRow(
-                        icon = if (p.kind == PlaceKind.STOP) BusIcon else Icons.Rounded.Place,
+                        icon = placeIcon(p),
                         title = p.name,
                         detail = p.detail,
                     ) { onPick(p) }
@@ -968,8 +1011,94 @@ private fun RideStep(
                 fontWeight = FontWeight.SemiBold,
             )
             TimeLine("Arriva", leg.arrival, liveArr, now, liveColor)
+            // Avvisi di servizio sulla linea o sulle paline di salita e discesa.
+            leg.alerts(LocalRouteAlerts.current).forEach { AlertRow(it) }
         }
     }
+}
+
+/** Avvisi di servizio attivi della navigazione (dalla scheda Avvisi). */
+private val LocalRouteAlerts = androidx.compose.runtime.staticCompositionLocalOf<List<com.example.bustrack.gtfs.ServiceAlert>> { emptyList() }
+
+/** Avvisi che riguardano il tratto: la sua linea o le paline di salita e discesa. */
+private fun LegView.Ride.alerts(all: List<com.example.bustrack.gtfs.ServiceAlert>) =
+    all.filter { it.concerns(listOf(label), listOf(from.id, to.id)) }
+
+/** Avviso di servizio: titolo in rosso; toccandolo si apre il testo completo. */
+@Composable
+private fun AlertRow(a: com.example.bustrack.gtfs.ServiceAlert) {
+    var open by remember(a.id) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .padding(top = 6.dp)
+            .fillMaxWidth()
+            .clip(CardCorner)
+            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
+            .clickable { open = !open }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(a.header, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+        }
+        if (open) {
+            a.description?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(top = 4.dp, start = 22.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Tasti a pillola Casa e Lavoro (Home, sopra le linee preferite): toccandone uno si apre la
+ * navigazione verso quel luogo. Si vedono solo quelli da proporre (vedi NavigationModel.shortcuts).
+ */
+@Composable
+internal fun NavShortcutPills(places: List<Place>, onPick: (Place) -> Unit, modifier: Modifier = Modifier) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier.fillMaxWidth()) {
+        places.forEach { p ->
+            Surface(
+                onClick = { onPick(p) },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 4.dp,
+                tonalElevation = 3.dp,
+                modifier = Modifier.weight(1f).height(48.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                ) {
+                    Icon(placeIcon(p), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(p.name, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/** Icona di un luogo: fermata, casa, lavoro o indirizzo. */
+private fun placeIcon(p: Place): ImageVector = when (p.kind) {
+    PlaceKind.STOP -> BusIcon
+    PlaceKind.HOME -> Icons.Rounded.Home
+    PlaceKind.WORK -> WorkIcon
+    else -> Icons.Rounded.Place
+}
+
+internal val WorkIcon: ImageVector by lazy {
+    materialIcon(
+        "Work",
+        "M20,6h-4V4c0,-1.11 -0.89,-2 -2,-2h-4c-1.11,0 -2,0.89 -2,2v2H4c-1.11,0 -1.99,0.89 -1.99,2L2,19c0,1.11 " +
+            "0.89,2 2,2h16c1.11,0 2,-0.89 2,-2V8c0,-1.11 -0.89,-2 -2,-2zM14,6h-4V4h4v2z",
+    )
 }
 
 /** "Parte alle 15:59 · tra 4 min", con l'orario live in verde quando c'è. */

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scorciatoia "Vai a lavoro": icona Material "work" (Apache 2.0) su un cerchio nei colori dell'app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFEADDFF"
+        android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <group
+        android:scaleX="1.1"
+        android:scaleY="1.1"
+        android:translateX="10.8"
+        android:translateY="10.8">
+        <path
+            android:fillColor="#FF6650A4"
+            android:pathData="M20,6h-4V4c0,-1.11 -0.89,-2 -2,-2h-4c-1.11,0 -2,0.89 -2,2v2H4c-1.11,0 -1.99,0.89 -1.99,2L2,19c0,1.11 0.89,2 2,2h16c1.11,0 2,-0.89 2,-2V8c0,-1.11 -0.89,-2 -2,-2zM14,6h-4V4h4v2z" />
+    </group>
+</vector>

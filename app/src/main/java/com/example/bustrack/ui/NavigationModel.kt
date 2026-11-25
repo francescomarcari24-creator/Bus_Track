@@ -32,7 +32,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
 
-enum class PlaceKind { MY_LOCATION, STOP, ADDRESS }
+enum class PlaceKind { MY_LOCATION, STOP, ADDRESS, HOME, WORK }
 
 /** Luogo scelto come partenza o arrivo. */
 data class Place(
@@ -188,6 +188,50 @@ class NavigationModel(
 
     /** Ultimi luoghi scelti (pannello "Ricerche recenti" dei campi). */
     val recents = NavRecents.get(app)
+
+    private val _shortcuts = MutableStateFlow<List<Place>>(emptyList())
+    /**
+     * Casa e Lavoro da proporre come mete: quelli impostati, tranne quello entro 500 m dalla
+     * posizione attuale (a casa si propone solo il lavoro e viceversa; altrove entrambi).
+     * Vedi [refreshShortcuts].
+     */
+    val shortcuts: StateFlow<List<Place>> = _shortcuts
+
+    init {
+        // Cambiando Casa o Lavoro nelle impostazioni le scorciatoie si aggiornano.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(settings.homePlace, settings.workPlace) { _, _ -> }.collect { refreshShortcuts() }
+        }
+    }
+
+    /** Ricalcola le scorciatoie Casa/Lavoro con la posizione attuale (se nota da poco). */
+    fun refreshShortcuts() {
+        scope.launch {
+            val all = listOfNotNull(
+                settings.homePlace.value?.copy(name = "Casa", kind = PlaceKind.HOME, detail = settings.homePlace.value?.name),
+                settings.workPlace.value?.copy(name = "Lavoro", kind = PlaceKind.WORK, detail = settings.workPlace.value?.name),
+            )
+            if (all.isEmpty()) {
+                _shortcuts.value = emptyList()
+                return@launch
+            }
+            val here = runCatching { app.currentLocation(maxAgeMs = 300_000, timeoutMs = 5_000) }.getOrNull()
+            _shortcuts.value = all.filter { p ->
+                here == null || distanceMeters(here.latitude, here.longitude, p.lat, p.lon) > SHORTCUT_NEAR_M
+            }
+        }
+    }
+
+    /** Fermate e indirizzi che corrispondono a [query] (per scegliere Casa e Lavoro nelle impostazioni). */
+    suspend fun searchPlaces(query: String): List<Place> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        val stops = runCatching { repo.searchStops(q) }.getOrDefault(emptyList()).take(4).map {
+            Place(it.name, "Palina ${it.code ?: it.id}", it.lat, it.lon, PlaceKind.STOP)
+        }
+        val places = geocode(q).filter { p -> stops.none { distanceMeters(it.lat, it.lon, p.lat, p.lon) < 30 } }
+        return places + stops
+    }
 
     /**
      * Navigazione diretta verso [place] (es. una fermata aperta dalla Home): chiude un'eventuale
@@ -613,6 +657,8 @@ class NavigationModel(
 
     companion object {
         private const val TAG = "BusTrack"
+        /** Entro questa distanza da Casa (o Lavoro) quella meta non si propone. */
+        private const val SHORTCUT_NEAR_M = 500.0
 
         @Volatile private var instance: NavigationModel? = null
 

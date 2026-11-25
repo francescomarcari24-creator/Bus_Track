@@ -46,6 +46,9 @@ import com.example.bustrack.ui.theme.BusTrackTheme
 import com.example.bustrack.ui.theme.CardCorner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.clickable
+import com.example.bustrack.ui.currentLocation
 
 /**
  * Impostazioni: raggio delle fermate vicine, minuti proposti per l'avviso di arrivo,
@@ -90,6 +93,27 @@ private fun SettingsScreen(onBack: () -> Unit) {
             BackLabel("Indietro")
         }
         Text("Impostazioni", style = MaterialTheme.typography.headlineSmall)
+
+        Section("Luoghi della navigazione")
+        Text(
+            "Compaiono come prime mete nella scheda Nav (non quello a meno di 1 km da dove ti trovi)",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        val home by settings.homePlace.collectAsStateWithLifecycle()
+        val work by settings.workPlace.collectAsStateWithLifecycle()
+        var editing by remember { mutableStateOf<String?>(null) }
+        FavoritePlaceRow("Casa", home, onEdit = { editing = "Casa" }, onClear = { settings.setHomePlace(null) })
+        FavoritePlaceRow("Lavoro", work, onEdit = { editing = "Lavoro" }, onClear = { settings.setWorkPlace(null) })
+        editing?.let { which ->
+            PlacePickerDialog(
+                title = "Imposta $which",
+                onPick = { place ->
+                    if (which == "Casa") settings.setHomePlace(place) else settings.setWorkPlace(place)
+                    editing = null
+                },
+                onDismiss = { editing = null },
+            )
+        }
 
         Section("Fermate vicine")
         Text("Raggio di ricerca", style = MaterialTheme.typography.bodyMedium)
@@ -215,6 +239,96 @@ private fun SettingsScreen(onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** Riga di Casa o Lavoro: indirizzo impostato (o "Non impostato") e tasti per cambiarlo o rimuoverlo. */
+@Composable
+private fun FavoritePlaceRow(
+    label: String,
+    place: com.example.bustrack.ui.Place?,
+    onEdit: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                place?.let { listOfNotNull(it.name, it.detail).joinToString(" · ") } ?: "Non impostato",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+        TextButton(onClick = onEdit) { Text(if (place == null) "Imposta" else "Cambia") }
+        if (place != null) TextButton(onClick = onClear) { Text("Rimuovi") }
+    }
+}
+
+/**
+ * Scelta di un luogo per Casa o Lavoro: si cerca un indirizzo o una fermata (stessi suggerimenti
+ * della scheda Nav) oppure si usa la posizione attuale.
+ */
+@Composable
+private fun PlacePickerDialog(
+    title: String,
+    onPick: (com.example.bustrack.ui.Place) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val nav = remember { com.example.bustrack.ui.NavigationModel.get(context.applicationContext as android.app.Application) }
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<com.example.bustrack.ui.Place>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(query) {
+        if (query.trim().length < 2) { results = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(300)
+        busy = true
+        results = runCatching { nav.searchPlaces(query) }.getOrDefault(emptyList())
+        busy = false
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Indirizzo, luogo o fermata") },
+                    singleLine = true,
+                    shape = CardCorner,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = {
+                    scope.launch {
+                        busy = true
+                        val here = context.currentLocation(maxAgeMs = 60_000, timeoutMs = 10_000)
+                        busy = false
+                        if (here != null) onPick(nav.describePoint(here.latitude, here.longitude))
+                    }
+                }) { Text("Usa la posizione attuale") }
+                if (busy) Text("Cerco…", style = MaterialTheme.typography.bodySmall)
+                Column(Modifier.verticalScroll(rememberScrollState()).height(260.dp)) {
+                    results.forEach { p ->
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(p) }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(p.name, style = MaterialTheme.typography.bodyLarge)
+                            p.detail?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+    )
 }
 
 @Composable

@@ -70,7 +70,7 @@ class NavRecents private constructor(context: Context) {
     val items: kotlinx.coroutines.flow.StateFlow<List<Place>> = _items
 
     fun add(place: Place) {
-        if (place.kind == PlaceKind.MY_LOCATION) return
+        if (place.kind == PlaceKind.MY_LOCATION || place.kind == PlaceKind.HOME || place.kind == PlaceKind.WORK) return
         val updated = (listOf(place) + _items.value.filterNot { it.name == place.name && it.detail == place.detail }).take(MAX)
         _items.value = updated
         save(updated)

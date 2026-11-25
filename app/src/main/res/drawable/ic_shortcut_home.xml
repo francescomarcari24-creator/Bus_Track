@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scorciatoia "Vai a casa": icona Material "home" (Apache 2.0) su un cerchio nei colori dell'app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFEADDFF"
+        android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <group
+        android:scaleX="1.1"
+        android:scaleY="1.1"
+        android:translateX="10.8"
+        android:translateY="10.8">
+        <path
+            android:fillColor="#FF6650A4"
+            android:pathData="M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z" />
+    </group>
+</vector>

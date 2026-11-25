@@ -52,6 +52,48 @@ class AppSettings private constructor(context: Context) {
             .apply()
     }
 
+    private val _homePlace = MutableStateFlow(readPlace(KEY_HOME))
+    /** Casa (navigazione): compare come prima meta proposta. */
+    val homePlace: StateFlow<com.example.bustrack.ui.Place?> = _homePlace.asStateFlow()
+
+    private val _workPlace = MutableStateFlow(readPlace(KEY_WORK))
+    /** Lavoro (navigazione): compare come prima meta proposta. */
+    val workPlace: StateFlow<com.example.bustrack.ui.Place?> = _workPlace.asStateFlow()
+
+    fun setHomePlace(place: com.example.bustrack.ui.Place?) {
+        _homePlace.value = place
+        writePlace(KEY_HOME, place)
+        com.example.bustrack.navigation.NavShortcuts.update(appContext, place, _workPlace.value)
+    }
+
+    fun setWorkPlace(place: com.example.bustrack.ui.Place?) {
+        _workPlace.value = place
+        writePlace(KEY_WORK, place)
+        com.example.bustrack.navigation.NavShortcuts.update(appContext, _homePlace.value, place)
+    }
+
+    private val appContext = context.applicationContext
+
+    private fun readPlace(key: String): com.example.bustrack.ui.Place? {
+        val p = prefs.getString(key, null)?.split('\t') ?: return null
+        if (p.size < 4) return null
+        return com.example.bustrack.ui.Place(
+            name = p[0],
+            detail = p[1].ifEmpty { null },
+            lat = p[2].toDoubleOrNull() ?: return null,
+            lon = p[3].toDoubleOrNull() ?: return null,
+            kind = com.example.bustrack.ui.PlaceKind.ADDRESS,
+        )
+    }
+
+    private fun writePlace(key: String, place: com.example.bustrack.ui.Place?) {
+        fun clean(s: String?) = s.orEmpty().replace('\t', ' ').replace('\n', ' ')
+        prefs.edit().apply {
+            if (place == null) remove(key)
+            else putString(key, "${clean(place.name)}\t${clean(place.detail)}\t${place.lat}\t${place.lon}")
+        }.apply()
+    }
+
     fun setFavoriteAlerts(value: Boolean) {
         _favoriteAlerts.value = value
         prefs.edit().putBoolean(KEY_FAVORITE_ALERTS, value).apply()
@@ -77,6 +119,8 @@ class AppSettings private constructor(context: Context) {
     }
 
     companion object {
+        private const val KEY_HOME = "nav_home"
+        private const val KEY_WORK = "nav_work"
         private const val KEY_ROUTE_LESS_WALK = "route_less_walk"
         private const val KEY_ROUTE_LESS_TRANSFERS = "route_less_transfers"
         private const val KEY_ROUTE_NO_METRO = "route_no_metro"
