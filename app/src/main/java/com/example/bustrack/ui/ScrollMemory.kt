@@ -52,6 +52,14 @@ class ScrollMemory {
     var mapShowStops by mutableStateOf(false)
     var vehiclesFilter by mutableStateOf("")
 
+    /** Scheda Percorso: partenza e arrivo scritti. */
+    var routeFrom by mutableStateOf("")
+    var routeTo by mutableStateOf("")
+    /** Navigazione di cui la mappa ha già inquadrato il percorso. */
+    var navFittedKey: String? = null
+    /** Campo della partenza aperto (altrimenti si parte dalla posizione attuale). */
+    var routeFromOpen by mutableStateOf(false)
+
     /** Scheda Avvisi: ricerca per linea (o testo). */
     var alertsQuery by mutableStateOf("")
 

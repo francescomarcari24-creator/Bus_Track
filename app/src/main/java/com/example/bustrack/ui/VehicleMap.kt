@@ -115,6 +115,33 @@ private const val STOPS_NEAR_SOURCE = "stops-near"
 private const val STOP_NEAR_LAYER = "stops-near-point"
 private const val STOP_NEAR_LABEL_LAYER = "stops-near-label"
 
+/** Navigazione in corso: tratti (a piedi tratteggiati, in mezzo pieni) e paline di salita/discesa. */
+private const val NAV_SOURCE = "nav-lines"
+private const val NAV_WALK_LAYER = "nav-walk"
+private const val NAV_RIDE_CASING_LAYER = "nav-ride-casing"
+private const val NAV_RIDE_LAYER = "nav-ride"
+private const val NAV_POINTS_SOURCE = "nav-points"
+private const val NAV_POINT_LAYER = "nav-point"
+private const val NAV_LABEL_LAYER = "nav-label"
+
+/** Percorso di una navigazione da disegnare sulla mappa. */
+class NavMapData(val key: String, val lines: List<NavLine>, val points: List<NavPoint>)
+/** Tratto: a piedi, oppure in mezzo con il suo colore ([color], ARGB). */
+class NavLine(val lat: DoubleArray, val lon: DoubleArray, val walk: Boolean, val color: Int = 0)
+enum class NavPointKind { START, BOARD, TRANSFER, ALIGHT, END }
+/** Palina o estremo del percorso; [color] (ARGB) = colore della linea, se null quello del ruolo. */
+class NavPoint(val lat: Double, val lon: Double, val label: String, val kind: NavPointKind, val color: Int? = null)
+
+/** Colori ufficiali delle linee della metropolitana di Roma (per numero di linea). */
+fun metroColor(label: String): Int? = when (label.uppercase()) {
+    "MEA" -> 0xFFF7941D.toInt() // A arancione
+    "MEB", "MEB1" -> 0xFF0067B1.toInt() // B blu
+    "MEC" -> 0xFF00843D.toInt() // C verde scuro
+    else -> null
+}
+
+private fun hex(argb: Int) = "#%06X".format(0xFFFFFF and argb)
+
 private val VEHICLE_LAYERS = listOf(CIRCLE_LAYER, ARROW_LAYER, LABEL_LAYER)
 private val STOP_LAYERS = listOf(
     STOP_CLUSTER_LAYER, STOP_COUNT_LAYER, STOP_POINT_LAYER, STOP_LABEL_LAYER, STOP_NEAR_LAYER, STOP_NEAR_LABEL_LAYER,
@@ -143,6 +170,8 @@ fun VehicleMap(
     /** Fermate vicine all'utente (entro 1 km), evidenziate nel livello fermate. */
     nearStopIds: Set<String>,
     modifier: Modifier = Modifier,
+    /** Navigazione in corso: si disegna il suo percorso e la mappa lo inquadra. */
+    navigation: NavMapData? = null,
 ) {
     val context = LocalContext.current
     // Tutti i mezzi sulla mappa sono tracciati live: verde. Le fermate sono dati statici: colore tema.
@@ -240,6 +269,7 @@ fun VehicleMap(
             // Il tracciato sta sotto a tutto il resto (fermate e mezzi).
             addRouteLayers(loaded, stopColor, halo)
             addStopLayers(loaded, stopColor, onStopColor, nearColor, halo)
+            addNavLayers(loaded, stopColor, if (dark) 0xFFC4C7C5.toInt() else 0xFF5F6368.toInt(), halo)
             loaded.addSource(GeoJsonSource(SOURCE_ID))
             loaded.addLayer(
                 CircleLayer(CIRCLE_LAYER, SOURCE_ID).withProperties(
@@ -369,6 +399,66 @@ fun VehicleMap(
             }
         } else if (lineShapes.isEmpty()) {
             memory.fittedLineKey = null
+        }
+    }
+
+    // Percorso della navigazione: tratti e paline; inquadrato una volta per navigazione.
+    val navColors = mapOf(
+        NavPointKind.START to MaterialTheme.colorScheme.tertiary.toArgb(),
+        NavPointKind.BOARD to stopColor,
+        NavPointKind.TRANSFER to stopColor,
+        NavPointKind.ALIGHT to stopColor,
+        NavPointKind.END to MaterialTheme.colorScheme.error.toArgb(),
+    )
+    LaunchedEffect(style, navigation) {
+        val loaded = style ?: return@LaunchedEffect
+        val lines = loaded.getSourceAs<GeoJsonSource>(NAV_SOURCE) ?: return@LaunchedEffect
+        val points = loaded.getSourceAs<GeoJsonSource>(NAV_POINTS_SOURCE) ?: return@LaunchedEffect
+        val nav = navigation
+        lines.setGeoJson(
+            FeatureCollection.fromFeatures(
+                nav?.lines.orEmpty().map { l ->
+                    Feature.fromGeometry(LineString.fromLngLats(l.lat.indices.map { Point.fromLngLat(l.lon[it], l.lat[it]) }))
+                        .apply {
+                            addBooleanProperty("walk", l.walk)
+                            addStringProperty("color", hex(l.color))
+                        }
+                }
+            )
+        )
+        points.setGeoJson(
+            FeatureCollection.fromFeatures(
+                nav?.points.orEmpty().map { p ->
+                    Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply {
+                        addStringProperty("label", p.label)
+                        addStringProperty("color", hex(p.color ?: navColors.getValue(p.kind)))
+                        addBooleanProperty("big", p.kind != NavPointKind.START && p.kind != NavPointKind.END)
+                        // Priorità delle scritte quando non c'è spazio per tutte: prima salite e cambi.
+                        addNumberProperty(
+                            "prio",
+                            when (p.kind) {
+                                NavPointKind.BOARD, NavPointKind.TRANSFER -> 0
+                                NavPointKind.END -> 1
+                                NavPointKind.ALIGHT -> 2
+                                NavPointKind.START -> 3
+                            },
+                        )
+                    }
+                }
+            )
+        )
+        if (nav == null) {
+            memory.navFittedKey = null
+        } else if (!inPreview && memory.navFittedKey != nav.key) {
+            memory.navFittedKey = nav.key
+            val bounds = LatLngBounds.Builder().apply {
+                nav.lines.forEach { l -> l.lat.indices.forEach { include(LatLng(l.lat[it], l.lon[it])) } }
+                nav.points.forEach { include(LatLng(it.lat, it.lon)) }
+            }.build()
+            val pad = (56 * context.resources.displayMetrics.density).toInt()
+            mapView.getMapAsync { map ->
+                map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, pad, pad, pad + barInsetPx.toInt()), 600)
+            }
         }
     }
 
@@ -536,6 +626,81 @@ private fun addRouteLayers(style: Style, color: Int, halo: Int) {
                 PropertyFactory.textAllowOverlap(true),
                 PropertyFactory.textIgnorePlacement(true),
             )
+    )
+}
+
+/**
+ * Livelli della navigazione: tratti in mezzo pieni (colore tema, con bordo), tratti a piedi
+ * tratteggiati (grigio), paline con il loro ruolo scritto accanto ("Sali", "Scendi", ...).
+ */
+private fun addNavLayers(style: Style, color: Int, walkColor: Int, halo: Int) {
+    style.addSource(GeoJsonSource(NAV_SOURCE))
+    val isWalk = Expression.eq(Expression.get("walk"), Expression.literal(true))
+    val width = Expression.interpolate(
+        Expression.linear(), Expression.zoom(),
+        Expression.stop(10, 3.5f), Expression.stop(14, 6f), Expression.stop(18, 10f),
+    )
+    style.addLayer(
+        LineLayer(NAV_WALK_LAYER, NAV_SOURCE).withFilter(isWalk).withProperties(
+            PropertyFactory.lineColor(walkColor),
+            PropertyFactory.lineWidth(
+                Expression.interpolate(
+                    Expression.linear(), Expression.zoom(),
+                    Expression.stop(10, 2.5f), Expression.stop(14, 4f), Expression.stop(18, 7f),
+                )
+            ),
+            PropertyFactory.lineDasharray(arrayOf(0.6f, 1.6f)),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
+    style.addLayer(
+        LineLayer(NAV_RIDE_CASING_LAYER, NAV_SOURCE).withFilter(Expression.not(isWalk)).withProperties(
+            PropertyFactory.lineColor(halo),
+            PropertyFactory.lineWidth(Expression.sum(width, Expression.literal(3f))),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
+    style.addLayer(
+        LineLayer(NAV_RIDE_LAYER, NAV_SOURCE).withFilter(Expression.not(isWalk)).withProperties(
+            PropertyFactory.lineColor(Expression.toColor(Expression.get("color"))),
+            PropertyFactory.lineWidth(width),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        )
+    )
+    style.addSource(GeoJsonSource(NAV_POINTS_SOURCE))
+    val big = Expression.eq(Expression.get("big"), Expression.literal(true))
+    style.addLayer(
+        CircleLayer(NAV_POINT_LAYER, NAV_POINTS_SOURCE).withProperties(
+            PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
+            PropertyFactory.circleStrokeColor(halo),
+            PropertyFactory.circleStrokeWidth(3f),
+            PropertyFactory.circleRadius(Expression.switchCase(big, Expression.literal(8f), Expression.literal(7f))),
+        )
+    )
+    style.addLayer(
+        SymbolLayer(NAV_LABEL_LAYER, NAV_POINTS_SOURCE).withProperties(
+            PropertyFactory.textField(Expression.get("label")),
+            PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+            PropertyFactory.textSize(12f),
+            // Niente scritte sovrapposte: ognuna prova sotto, sopra, a destra e a sinistra del
+            // pallino; se non trova posto si nasconde (ricompare zoomando), le salite per ultime.
+            PropertyFactory.textVariableAnchor(
+                arrayOf(Property.TEXT_ANCHOR_TOP, Property.TEXT_ANCHOR_BOTTOM, Property.TEXT_ANCHOR_LEFT, Property.TEXT_ANCHOR_RIGHT)
+            ),
+            PropertyFactory.textRadialOffset(1.1f),
+            PropertyFactory.textJustify(Property.TEXT_JUSTIFY_AUTO),
+            PropertyFactory.symbolSortKey(Expression.get("prio")),
+            PropertyFactory.textMaxWidth(10f),
+            PropertyFactory.textColor(Expression.toColor(Expression.get("color"))),
+            PropertyFactory.textHaloColor(halo),
+            PropertyFactory.textHaloWidth(2f),
+            PropertyFactory.textAllowOverlap(false),
+            PropertyFactory.textIgnorePlacement(false),
+            PropertyFactory.textPadding(4f),
+        )
     )
 }
 

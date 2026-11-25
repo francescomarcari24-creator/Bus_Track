@@ -130,6 +130,12 @@ class TransitRepository(private val context: Context) {
         }
     }
 
+    /** Previsioni live di tutte le corse (feed TripUpdates), per seguire i mezzi di una navigazione. */
+    suspend fun tripUpdates(): RealtimeSnapshot<Arrival> {
+        val p = parser()
+        return withContext(Dispatchers.IO) { fetch(RomeFeeds.TRIP_UPDATES) { p.parseTripUpdates(it) } }
+    }
+
     suspend fun vehiclePositions(): RealtimeSnapshot<VehiclePosition> {
         val p = parser()
         return withContext(Dispatchers.IO) { fetch(RomeFeeds.VEHICLE_POSITIONS) { p.parseVehiclePositions(it) } }

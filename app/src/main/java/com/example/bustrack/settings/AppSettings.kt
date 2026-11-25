@@ -31,6 +31,27 @@ class AppSettings private constructor(context: Context) {
     /** Notifiche dei nuovi avvisi su linee e fermate preferite. */
     val favoriteAlerts: StateFlow<Boolean> = _favoriteAlerts.asStateFlow()
 
+    private val _routeOptions = MutableStateFlow(
+        com.example.bustrack.routing.PlanOptions(
+            lessWalking = prefs.getBoolean(KEY_ROUTE_LESS_WALK, false),
+            lessTransfers = prefs.getBoolean(KEY_ROUTE_LESS_TRANSFERS, false),
+            noMetro = prefs.getBoolean(KEY_ROUTE_NO_METRO, false),
+            noTram = prefs.getBoolean(KEY_ROUTE_NO_TRAM, false),
+        )
+    )
+    /** Preferenze sul percorso della scheda Nav. */
+    val routeOptions: StateFlow<com.example.bustrack.routing.PlanOptions> = _routeOptions.asStateFlow()
+
+    fun setRouteOptions(value: com.example.bustrack.routing.PlanOptions) {
+        _routeOptions.value = value
+        prefs.edit()
+            .putBoolean(KEY_ROUTE_LESS_WALK, value.lessWalking)
+            .putBoolean(KEY_ROUTE_LESS_TRANSFERS, value.lessTransfers)
+            .putBoolean(KEY_ROUTE_NO_METRO, value.noMetro)
+            .putBoolean(KEY_ROUTE_NO_TRAM, value.noTram)
+            .apply()
+    }
+
     fun setFavoriteAlerts(value: Boolean) {
         _favoriteAlerts.value = value
         prefs.edit().putBoolean(KEY_FAVORITE_ALERTS, value).apply()
@@ -56,6 +77,10 @@ class AppSettings private constructor(context: Context) {
     }
 
     companion object {
+        private const val KEY_ROUTE_LESS_WALK = "route_less_walk"
+        private const val KEY_ROUTE_LESS_TRANSFERS = "route_less_transfers"
+        private const val KEY_ROUTE_NO_METRO = "route_no_metro"
+        private const val KEY_ROUTE_NO_TRAM = "route_no_tram"
         const val DEFAULT_RADIUS_M = 1000
         val RADIUS_OPTIONS = listOf(500, 1000, 1500, 2000)
         val DEFAULT_THRESHOLDS = listOf(1, 3, 5, 10)

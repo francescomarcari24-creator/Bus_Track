@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 private val BarHeight = 48.dp
 private val BarBottomMargin = 12.dp
@@ -390,12 +391,24 @@ private fun PillTabs(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
+                    // Una riga sola: se la voce non ci sta (es. "Navigazione" con quattro schede) il
+                    // testo si rimpicciolisce un poco invece di andare a capo.
+                    val labelStyle = MaterialTheme.typography.labelLarge
+                    androidx.compose.foundation.text.BasicText(
                         label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = labelStyle.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        maxLines = 1,
+                        softWrap = false,
+                        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(
+                            minFontSize = 10.sp,
+                            maxFontSize = labelStyle.fontSize,
+                            stepSize = 0.5.sp,
+                        ),
+                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
             }

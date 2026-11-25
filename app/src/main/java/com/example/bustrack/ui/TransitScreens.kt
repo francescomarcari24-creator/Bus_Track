@@ -76,6 +76,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.example.bustrack.favorites.Favorite
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.example.bustrack.ui.theme.CardCorner
 import com.example.bustrack.ui.theme.LiveTheme
 import androidx.compose.ui.res.painterResource
@@ -155,7 +156,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         { stop: Stop ->
             // La fermata si apre nella scheda Home ma indietro riporta alla mappa (vedi pageStack).
             vm.openStopFromMap(stop)
-            openTab(0)
+            openTab(Tabs.HOME)
         }
     }
     // Dalla mappa: apre l'elenco fermate della linea nella scheda Home; indietro torna alla mappa.
@@ -166,14 +167,28 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     // mappa e, se annullato, si resta lì. Ogni nuova apertura della linea ha un openId diverso.
     val stopsState by vm.stops.collectAsStateWithLifecycle()
     val lineFromMapId = stopsState.line?.openId?.takeIf { stopsState.lineFromMap }
-    LaunchedEffect(lineFromMapId) { if (lineFromMapId != null) openTab(0) }
+    LaunchedEffect(lineFromMapId) { if (lineFromMapId != null) openTab(Tabs.HOME) }
+    // In tutta l'app: chiudendo la tastiera (gesto indietro o suo tasto) il campo perde il focus,
+    // quindi il cursore sparisce; ricompare solo toccando di nuovo un campo. Non quando la tastiera
+    // si chiude perché si apre la finestra della direzione (il pannello delle recenti si chiude dopo).
+    val appFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val appImeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    var appImeWasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(appImeVisible) {
+        if (appImeVisible) {
+            appImeWasVisible = true
+        } else if (appImeWasVisible) {
+            appImeWasVisible = false
+            if (vm.stops.value.directionChoice == null) appFocusManager.clearFocus()
+        }
+    }
     // Fermata chiesta da fuori (tocco sul widget): si apre nella scheda Home.
     val pendingStop by com.example.bustrack.PendingStopOpen.stopId.collectAsStateWithLifecycle()
     LaunchedEffect(pendingStop) {
         val id = pendingStop ?: return@LaunchedEffect
         com.example.bustrack.PendingStopOpen.stopId.value = null
         vm.openStopById(id)
-        openTab(0)
+        openTab(Tabs.HOME)
     }
     // Notifica di un avviso sui preferiti: scheda Avvisi, elenco completo.
     val pendingAlerts by com.example.bustrack.PendingStopOpen.alerts.collectAsStateWithLifecycle()
@@ -181,7 +196,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
         if (!pendingAlerts) return@LaunchedEffect
         com.example.bustrack.PendingStopOpen.alerts.value = false
         scrollMemory.alertsQuery = ""
-        openTab(2)
+        openTab(Tabs.ALERTS)
     }
     // Popup della direzione: sta qui, fuori dalle schede, perché deve comparire sopra qualunque
     // scheda (dentro la Home verrebbe soppresso quando la Home non è visibile, es. dalla mappa).
@@ -200,7 +215,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
             scrollMemory.vehiclesShowMap = true
             scrollMemory.mapShowStops = false
             scrollMemory.fittedLineKey = null
-            openTab(1)
+            openTab(Tabs.MAP)
         }
     }
     // Indietro di una scheda (usato dal gesto e dal pulsante "← Mappa" di una fermata aperta dalla mappa).
@@ -212,7 +227,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
     // Una fermata aperta dalla mappa si chiude solo a scheda cambiata del tutto, non durante lo scorrimento:
     // altrimenti, mentre la scheda esce, si vedrebbe già la Home al posto dei dettagli.
     LaunchedEffect(tab) {
-        if (tab != 0) {
+        if (tab != Tabs.HOME) {
             snapshotFlow { tabPosition.value }.first { kotlin.math.abs(it - tab) < 0.001f }
             vm.closeStopIfFromMap()
         }
@@ -243,7 +258,7 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                 // I gestori interni (es. pagine dentro Home) sono composti dopo e hanno la precedenza.
                 TabPager(
                     position = tabPosition,
-                    count = 3,
+                    count = Tabs.LABELS.size,
                     current = tab,
                     gesture = tabGesture,
                     previewTab = history.getOrNull(history.size - 2),
@@ -253,15 +268,15 @@ fun BusTrackApp(vm: TransitViewModel = viewModel()) {
                 val online by com.example.bustrack.settings.Connectivity.online.collectAsStateWithLifecycle()
                 OfflinePill(visible = !online, modifier = Modifier.align(Alignment.BottomCenter))
                 FloatingTabBar(
-                    labels = listOf("Home", "Mappa", "Avvisi"),
+                    labels = Tabs.LABELS,
                     selected = tab,
                     onSelect = { i ->
                         // "Home" riporta sempre alla schermata iniziale (preferiti + ricerca),
                         // "Mappa" alla mappa generale con tutti i bus (es. dopo aver aperto una fermata),
                         // "Avvisi" all'elenco completo (senza la ricerca per linea).
-                        if (i == 0) vm.goToStopsHome()
-                        if (i == 1) scrollMemory.resetMap()
-                        if (i == 2) scrollMemory.alertsQuery = ""
+                        if (i == Tabs.HOME) vm.goToStopsHome()
+                        if (i == Tabs.MAP) scrollMemory.resetMap()
+                        if (i == Tabs.ALERTS) scrollMemory.alertsQuery = ""
                         openTab(i)
                     },
                     position = tabPosition,
@@ -277,8 +292,9 @@ private fun TabContent(tab: Int, vm: TransitViewModel) {
     when (tab) {
         // Tutte le schede arrivano fino al bordo dello schermo: la barra flottante sta sopra.
         // Le liste hanno uno spazio finale (LocalBottomBarInset) per portare l'ultima voce sopra la barra.
-        0 -> StopsScreen(vm)
-        1 -> VehiclesScreen(vm)
+        Tabs.HOME -> StopsScreen(vm)
+        Tabs.MAP -> VehiclesScreen(vm)
+        Tabs.ROUTE -> RoutePlannerScreen(vm)
         else -> AlertsScreen(vm)
     }
 }
@@ -788,7 +804,22 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     var filter by memory::vehiclesFilter
     var showMap by memory::vehiclesShowMap
     // Livello della mappa: bus (live) oppure fermate (statiche).
-    var showStops by memory::mapShowStops
+    var showStopsChoice by memory::mapShowStops
+    // Navigazione in corso: la mappa mostra il suo percorso e i mezzi delle linee coinvolte.
+    val navState by vm.navigation.state.collectAsStateWithLifecycle()
+    val navJourney = navState.active
+    // Corse della navigazione seguite dal vivo: mezzo nel feed delle posizioni o previsioni live.
+    val liveTrips = run {
+        val ids = (state as? Load.Ready)?.value.orEmpty().mapNotNullTo(HashSet()) { it.tripId }
+        navState.live.keys.mapTo(ids) { it.substringBefore('|') }
+        navJourney?.legs?.filterIsInstance<LegView.Ride>()?.mapNotNullTo(HashSet()) { r -> r.tripId.takeIf { it in ids } }.orEmpty()
+    }
+    val liveArgb = LiveTheme.colors.live.toArgb()
+    val navMap = remember(navJourney, liveTrips, liveArgb) { navJourney?.toMapData(liveTrips, liveArgb) }
+    val navRoutes = remember(navJourney) {
+        navJourney?.legs?.filterIsInstance<LegView.Ride>()?.mapTo(HashSet()) { it.routeId }.orEmpty()
+    }
+    val showStops = showStopsChoice && navJourney == null
     val mapStops by vm.mapStops.collectAsStateWithLifecycle()
     val stopIds by vm.mapStopIds.collectAsStateWithLifecycle()
     val openStop = LocalOpenStop.current
@@ -816,6 +847,8 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             val wait = if (current is Load.Ready) TransitViewModel.liveDelayMs(current.feedTimestamp) else 0
             if (wait > 0) kotlinx.coroutines.delay(wait)
             vm.refreshVehicles().join()
+            // In navigazione anche le previsioni live delle sue corse (colore dei tracciati).
+            if (vm.navigation.state.value.active != null) vm.navigation.refreshLive()
             // Mai scaricato con successo: niente tentativi a raffica.
             if (vm.vehicles.value !is Load.Ready) kotlinx.coroutines.delay(10_000)
         }
@@ -823,7 +856,8 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     val linePatterns by vm.mapLinePatterns.collectAsStateWithLifecycle()
     val barInset = LocalBottomBarInset.current
     val vehicles = (state as? Load.Ready)?.value.orEmpty()
-    val shown = if (filter.isBlank()) vehicles
+    val shown = if (navJourney != null) vehicles.filter { it.routeId in navRoutes }
+    else if (filter.isBlank()) vehicles
     else vehicles.filter {
         it.routeLabel.equals(filter.trim(), ignoreCase = true) &&
             // Con una direzione scelta i mezzi dell'altra non si vedono (senza direzione nel feed restano).
@@ -833,15 +867,18 @@ private fun VehiclesScreen(vm: TransitViewModel) {
     val shownStopIds = lineChoice?.let { c -> linePatterns.firstOrNull { it.directionId == c.directionId } }
         ?.stopIds?.toSet() ?: stopIds
     // Le fermate si vedono sempre sulla mappa; l'elenco esiste solo per i bus.
-    val mapVisible = showStops || showMap
+    val mapVisible = showStops || showMap || navJourney != null
     Column(Modifier.fillMaxSize()) {
+        if (navJourney != null) {
+            NavMapHeader(navJourney, shown.size, onStop = vm.navigation::stopNavigation)
+        } else {
         // Pillola a due posizioni, bus (live) / fermate (statiche): stesso aspetto e comportamento
         // della barra in basso e di "Preferiti / Vicine" (tocco o trascinamento dell'indicatore).
         // La mappa sotto è una sola: cambia solo il livello mostrato, niente scorrimento laterale.
         PillSwitch(
             labels = listOf("Bus", "Fermate"),
             selected = if (showStops) 1 else 0,
-            onSelect = { showStops = it == 1 },
+            onSelect = { showStopsChoice = it == 1 },
             position = rememberTabPosition(if (showStops) 1 else 0),
             modifier = Modifier.padding(top = 12.dp),
         )
@@ -864,7 +901,10 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 RefreshButton(TransitViewModel.REFRESH_VEHICLES in refreshing) { vm.refreshVehicles(manual = true) }
             }
         }
+        }
         if (mapVisible) {
+            val openLine = LocalOpenLineFromMap.current
+            if (navJourney == null) {
             // Riga di stato sopra la mappa. La mappa è sempre presente (anche a feed vuoto) e resta
             // la stessa quando si passa da bus a fermate: cambia solo il livello mostrato.
             val updatedAt = (state as? Load.Ready)?.fetchedAt?.let { HHMM.format(Instant.ofEpochMilli(it)) }
@@ -879,7 +919,6 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 vehicles.isEmpty() -> "Nessun mezzo in servizio" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
                 else -> "${shown.size} mezzi" + (updatedAt?.let { " · aggiornato alle $it" } ?: "")
             }
-            val openLine = LocalOpenLineFromMap.current
             // Linea valida nel filtro: si può aprire l'elenco delle sue fermate.
             val lineLabel = filter.trim().takeIf { it.isNotEmpty() && (lineShapes.isNotEmpty() || !stopIds.isNullOrEmpty()) }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -921,6 +960,7 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                     }
                 }
             }
+            }
             // La mappa si ferma sopra la barra flottante (angoli arrotondati anche in basso): dentro,
             // logo, schede e inquadrature non devono più lasciare spazio alla barra.
             CompositionLocalProvider(LocalBottomBarInset provides 0.dp) {
@@ -929,8 +969,9 @@ private fun VehiclesScreen(vm: TransitViewModel) {
                 showStops = showStops,
                 stops = mapStops,
                 visibleStopIds = shownStopIds,
-                lineShapes = lineShapes,
+                lineShapes = if (navJourney != null) emptyList() else lineShapes,
                 highlightDirection = lineChoice?.directionId,
+                navigation = navMap,
                 onOpenStop = openStop,
                 loadRoutes = vm::routesForStop,
                 onOpenLine = { v -> openLine(v.routeLabel, v.routeId, v.directionId) },
@@ -958,6 +999,71 @@ private fun VehiclesScreen(vm: TransitViewModel) {
             }
         }
     }
+}
+
+/** Sopra la mappa durante una navigazione: riepilogo del percorso e tasto per terminarla. */
+@Composable
+private fun NavMapHeader(j: JourneyView, vehicleCount: Int, onStop: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Verso ${j.destination.name}", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val lines = j.legs.filterIsInstance<LegView.Ride>().joinToString(" › ") { it.label }
+            Text(
+                listOfNotNull(
+                    "Arrivo ${HHMM.format(Instant.ofEpochSecond(j.arrival))}",
+                    lines.ifEmpty { "a piedi" },
+                    "$vehicleCount mezzi live".takeIf { lines.isNotEmpty() },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        StopNavigationPill(onClick = onStop, label = "Termina")
+    }
+}
+
+/** Grigio dei tratti su linee senza tracciamento live. */
+private const val UNTRACKED_ARGB = 0xFF8A8F98.toInt()
+
+/**
+ * Percorso della navigazione per la mappa: tratti e paline con il loro ruolo. Colore dei tratti in
+ * mezzo: metro con il colore della sua linea (A arancione, B blu, C verde scuro), altrimenti verde se
+ * la corsa è seguita dal vivo e grigio se no. Discesa e salita successiva alla stessa palina (o a
+ * pochi passi) diventano un solo punto "Cambia", così le scritte non si sovrappongono.
+ */
+private fun JourneyView.toMapData(liveTrips: Set<String>, liveArgb: Int): NavMapData {
+    fun colorOf(r: LegView.Ride) = metroColor(r.label) ?: if (r.tripId in liveTrips) liveArgb else UNTRACKED_ARGB
+    val lines = legs.map { leg ->
+        when (leg) {
+            is LegView.Walk -> NavLine(leg.lat, leg.lon, walk = true)
+            is LegView.Ride -> NavLine(leg.lat, leg.lon, walk = false, color = colorOf(leg))
+        }
+    }
+    val rides = legs.filterIsInstance<LegView.Ride>()
+    val points = buildList {
+        add(NavPoint(origin.lat, origin.lon, "Partenza", NavPointKind.START))
+        rides.forEachIndexed { i, r ->
+            val prev = rides.getOrNull(i - 1)
+            val merged = prev != null &&
+                com.example.bustrack.gtfs.distanceMeters(prev.to.lat, prev.to.lon, r.from.lat, r.from.lon) < 60
+            if (merged) removeAt(lastIndex) // la discesa precedente diventa il cambio
+            val label = when {
+                i == 0 -> "Sali: ${r.label}\n${r.from.name}"
+                merged -> "Cambia: ${prev!!.label} › ${r.label}\n${r.from.name}"
+                else -> "Cambia: ${r.label}\n${r.from.name}"
+            }
+            add(NavPoint(r.from.lat, r.from.lon, label, if (i == 0) NavPointKind.BOARD else NavPointKind.TRANSFER, colorOf(r)))
+            add(NavPoint(r.to.lat, r.to.lon, "Scendi: ${r.label}\n${r.to.name}", NavPointKind.ALIGHT, colorOf(r)))
+        }
+        add(NavPoint(destination.lat, destination.lon, "Arrivo", NavPointKind.END))
+    }
+    return NavMapData(key, lines, points)
 }
 
 @Composable

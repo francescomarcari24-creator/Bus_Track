@@ -9,5 +9,13 @@
                 <action android:name="com.example.bustrack.DEBUG_UPDATE_GTFS" />
             </intent-filter>
         </receiver>
+        <!-- Solo debug: calcolo di un viaggio da adb (vedi DebugPlanReceiver). -->
+        <receiver
+            android:name=".DebugPlanReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.bustrack.DEBUG_PLAN" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

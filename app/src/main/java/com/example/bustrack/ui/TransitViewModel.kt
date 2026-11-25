@@ -130,6 +130,9 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = TransitRepository(app)
 
+    /** Scheda Nav: ricerca dei luoghi, percorsi e navigazione in corso. */
+    val navigation = NavigationModel(app, viewModelScope, repo)
+
     private val _stops = MutableStateFlow(StopsState())
     val stops: StateFlow<StopsState> = _stops
 
