@@ -107,6 +107,8 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
     var closing by remember(choice) { mutableStateOf(false) }
     val springSpec = spring<Float>(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)
     LaunchedEffect(choice) {
+        // Prima si crea e si misura la finestra (fotogrammi pesanti, ancora invisibile), poi si anima.
+        awaitFrames(2)
         progress.animateTo(1f, springSpec)
         // Solo a finestra aperta si chiude ciò che sta dietro (pannello, tastiera): chiuderlo prima
         // spostava tutto mentre la finestra cresceva.
@@ -160,6 +162,12 @@ fun DirectionDialog(choice: DirectionChoice, onPick: (RoutePattern) -> Unit, onD
                             // toccata (o poco più piccolo, al centro) e si allarga fino alla forma intera.
                             val p = progress.value
                             val b = finalBounds
+                            // Primo fotogramma: posizione finale non ancora misurata. Disegnarla ora la
+                            // mostrerebbe un istante al centro invece che dentro la riga (lampo).
+                            if (origin != null && b == null) {
+                                alpha = 0f
+                                return@graphicsLayer
+                            }
                             val w = size.width
                             val h = size.height
                             val start = if (origin != null && b != null) {

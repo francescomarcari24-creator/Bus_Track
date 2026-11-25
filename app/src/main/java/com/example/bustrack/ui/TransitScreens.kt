@@ -306,12 +306,8 @@ private fun StopsScreen(vm: TransitViewModel) {
     val state by vm.stops.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val stack = state.pageStack()
-    PredictiveBackLayer(
-        enabled = stack.size > 1,
-        onBack = vm::stopsBack,
-        previous = { StopsPageContent(stack[stack.size - 2], state, favorites, vm) },
-    ) {
-        StopsPageContent(stack.last(), state, favorites, vm)
+    PageStack(pages = stack, onBack = vm::stopsBack) { page ->
+        StopsPageContent(page, state, favorites, vm)
     }
 }
 
@@ -514,10 +510,13 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                     // Arriva fino al bordo in basso (la lista scorre sotto la barra), quindi angoli
                     // arrotondati solo in alto.
                     Box(
+                        // Fondo e bordo disegnati con la forma, senza ritagliare il contenuto: ritagliare con
+                        // angoli arrotondati due riquadri grandi quanto lo schermo, a ogni fotogramma dello
+                        // scorrimento Preferiti/Vicine, pesava sulla GPU. L'elenco si ritaglia già al suo
+                        // rettangolo e i margini interni tengono il contenuto lontano dagli angoli.
                         Modifier
                             .fillMaxSize()
-                            .clip(PanelShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow, PanelShape)
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), PanelShape)
                     ) {
                         // Le righe prendono lo sfondo del riquadro (niente riquadro per ogni riga).
@@ -666,7 +665,9 @@ private fun RecentSearchesPanel(
         modifier = modifier.fillMaxWidth(),
         shape = CardCorner,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 8.dp,
+        // Niente ombra: come la barra di ricerca da cui scende, e un'ombra grande che cambia
+        // altezza a ogni fotogramma era costosa (scatti mentre il pannello si apre/chiude).
+        shadowElevation = 0.dp,
         tonalElevation = 3.dp,
     ) {
         androidx.compose.animation.AnimatedVisibility(

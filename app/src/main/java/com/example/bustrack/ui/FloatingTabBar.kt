@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -120,11 +121,21 @@ fun TabPager(
         delay(600) // a riposo, dopo la prima schermata: prepara anche le altre
         for (i in 0 until count) if (i !in ready) { ready.add(i); delay(250) }
     }
+    // Salto tra schede non vicine (es. Avvisi -> Home) col tocco sulla barra: si vedono solo le due
+    // schede coinvolte, affiancate. Altrimenti lo scorrimento attraversava quella in mezzo (la
+    // mappa), che si risvegliava e ridisegnava per un attimo: lampo e fotogrammi lenti.
+    val from = previewTab
+    val jump = from != null && !position.dragging && !gesture.showing && kotlin.math.abs(from - current) > 1
+    val jumpSign = if (from != null && from > current) 1f else -1f
+    val jumpSpan = if (from != null) kotlin.math.abs(from - current).toFloat() else 1f
+    // derivedStateOf: si ricompone quando lo scorrimento parte o finisce, non a ogni fotogramma.
+    val jumpMoving by remember(current) { derivedStateOf { position.value != current.toFloat() } }
     Box(Modifier.fillMaxSize()) {
         for (i in 0 until count) {
             if (i !in ready && i !in first..last && i != previewTab) continue
             key(i) {
-                val active = i in first..last
+                // La scheda di partenza del salto conta solo finché si muove.
+                val active = if (jump) i == current || (i == from && jumpMoving) else i in first..last
                 // Durante il back predittivo la scheda precedente si scopre sotto quella attuale:
                 // è la stessa già composta (niente seconda mappa da ricaricare).
                 val isPreview = i == previewTab && gesture.showing
@@ -136,6 +147,15 @@ fun TabPager(
                         .graphicsLayer {
                             if (isPreview) {
                                 alpha = 1f
+                            } else if (jump) {
+                                // Avanzamento del salto (0 = scheda di partenza, 1 = arrivo) su una sola larghezza.
+                                val v = (position.value - current) / jumpSpan
+                                translationX = when (i) {
+                                    current -> -v * size.width
+                                    from -> (jumpSign - v) * size.width
+                                    else -> 0f
+                                }
+                                alpha = if (i == current || i == from) 1f else 0f
                             } else {
                                 translationX = (i - position.value) * size.width
                                 // Le schede lontane non si disegnano.
@@ -287,12 +307,20 @@ private fun PillTabs(
                 )
             },
     ) {
-        if (count > 0 && rowWidth > 0) {
+        if (count > 0) {
+            // Larghezza (1/count della pillola) e posizione calcolate mentre si misura e si posiziona:
+            // l'indicatore c'è già nel primo fotogramma. Prima dipendeva dalla larghezza letta dopo
+            // (onSizeChanged), quindi ogni pillola appena creata lampeggiava senza indicatore.
             Box(
                 Modifier
                     .fillMaxHeight()
-                    .width(with(LocalDensity.current) { (rowWidth / count).toDp() })
-                    .offset { IntOffset((indicator.value * rowWidth / count).roundToInt(), 0) }
+                    .fillMaxWidth(1f / count)
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        layout(placeable.width, placeable.height) {
+                            placeable.placeWithLayer((indicator.value * placeable.width).roundToInt(), 0)
+                        }
+                    }
                     .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
             )
         }

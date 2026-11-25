@@ -390,6 +390,8 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         startLineLoop(manual = false) {
+            // Prima l'animazione di apertura della pagina, poi il caricamento (non la rallenta).
+            delay(PAGE_OPEN_MS)
             val stops = runCatching { repo.stopsInOrder(pattern.stopIds) }.getOrDefault(emptyList())
             _stops.update { s -> s.copy(line = s.line?.copy(stops = stops, vehicles = Load.Loading)) }
         }
@@ -464,7 +466,7 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     /** Apre gli orari dal capolinea della linea aperta, per oggi. */
     fun openTimetable() {
         val line = _stops.value.line ?: return
-        loadTimetable(TimetableState(line.route, line.pattern, java.time.LocalDate.now(ROME)))
+        loadTimetable(TimetableState(line.route, line.pattern, java.time.LocalDate.now(ROME)), afterOpen = true)
     }
 
     fun setTimetableDate(date: java.time.LocalDate) {
@@ -476,10 +478,11 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         _stops.update { it.copy(timetable = null) }
     }
 
-    private fun loadTimetable(state: TimetableState) {
+    private fun loadTimetable(state: TimetableState, afterOpen: Boolean = false) {
         timetableJob?.cancel()
         _stops.update { it.copy(timetable = state) }
         timetableJob = viewModelScope.launch {
+            if (afterOpen) delay(PAGE_OPEN_MS)
             val result = load { repo.departures(state.pattern, state.date) }
             _stops.update { s -> if (s.timetable?.date == state.date) s.copy(timetable = s.timetable.copy(departures = result)) else s }
         }
@@ -505,6 +508,8 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         _stops.update { it.copy(selected = stop, openedFromMap = false, routes = emptyList(), arrivals = Load.Idle) }
         if (stop == null) return
         startArrivalsLoop(stop, manual = false) {
+            // Prima l'animazione di apertura della pagina, poi il caricamento (non la rallenta).
+            delay(PAGE_OPEN_MS)
             val routes = runCatching { repo.routesForStop(stop.id) }.getOrDefault(emptyList())
             _stops.update { it.copy(routes = routes, arrivals = Load.Loading) }
         }
@@ -641,6 +646,8 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** Durata dell'animazione di apertura di una pagina (PredictiveBackLayer): i dati si caricano dopo. */
+        const val PAGE_OPEN_MS = 320L
         /**
          * Attesa del prossimo download di un feed live da ~30 s: appena la centrale pubblica il
          * nuovo feed. Senza timestamp (mai scaricato con successo) si riprova dopo 10 s.
