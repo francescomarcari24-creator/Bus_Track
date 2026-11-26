@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -13,8 +15,10 @@ android {
         applicationId = "com.example.bustrack"
         minSdk = 34
         targetSdk = 37
+        // Ad ogni versione pubblicata su GitHub: versionCode +1 (deve crescere per installare
+        // l'aggiornamento sopra la versione precedente) e versionName aggiornato.
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -26,11 +30,25 @@ android {
         }
     }
 
+    // Chiave di rilascio per le versioni pubblicate su GitHub: letta da keystore.properties (nella
+    // radice del progetto, esclusa da git). Senza quel file la variante "publish" non si firma.
+    val keystoreFile = rootProject.file("keystore.properties")
+    val releaseKey = if (keystoreFile.exists()) {
+        val props = Properties()
+        keystoreFile.inputStream().use { props.load(it) }
+        signingConfigs.create("releaseKey") {
+            storeFile = file(props.getProperty("storeFile"))
+            storePassword = props.getProperty("storePassword")
+            keyAlias = props.getProperty("keyAlias")
+            keyPassword = props.getProperty("keyPassword")
+        }
+    } else null
+
     buildTypes {
         release {
             // Firmata con la chiave di debug per poterla installare sul telefono di prova sopra
-            // la debug (stessa firma: preferiti e impostazioni restano). Da sostituire con una
-            // chiave di rilascio vera prima di pubblicare l'app.
+            // la debug (stessa firma: preferiti e impostazioni restano). Per GitHub si usa la
+            // variante "publish" qui sotto, firmata con la chiave di rilascio.
             signingConfig = signingConfigs.getByName("debug")
             optimization {
                 enable = true
@@ -38,6 +56,14 @@ android {
                 // classi di Kotlin usate anche fuori da quei pacchetti (IllegalAccessError all'avvio).
                 // Regole di conservazione in src/main/keepRules/.
             }
+        }
+        // Versione da pubblicare su GitHub: identica alla release, ma firmata con la chiave di
+        // rilascio. ./gradlew :app:assemblePublish → app/build/outputs/apk/publish/
+        // (sul telefono di prova resta la release firmata con la chiave di debug).
+        create("publish") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            signingConfig = releaseKey
         }
     }
     compileOptions {

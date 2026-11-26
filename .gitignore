@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Chiave di rilascio (mai su GitHub)
+keystore.properties
+*.jks
+*.keystore

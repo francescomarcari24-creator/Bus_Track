@@ -55,6 +55,20 @@ I dati sono quelli aperti di **Roma Mobilità** (orari GTFS e feed in tempo real
 
 ---
 
+## Scaricare l'app
+
+L'app non è sul Play Store: si installa scaricando il pacchetto (APK) dalle **Release** di GitHub.
+
+1. Dal telefono apri **[l'ultima versione](https://github.com/francescomarcari24-creator/Bus_Track/releases/latest)** e scarica il file `BusTrack-x.y.z.apk` (sezione *Assets*).
+2. Apri il file scaricato. La prima volta Android chiede di **consentire l'installazione da questa fonte** (il browser o l'app File): consentila e torna indietro.
+3. Tocca **Installa**.
+
+Per **aggiornare**, scarica e installa la versione nuova allo stesso modo: si installa sopra quella vecchia e preferiti e impostazioni restano.
+
+Serve Android **14** o successivo su un telefono con processore **arm64** (praticamente tutti quelli recenti). Ogni versione è firmata con la stessa chiave: Android rifiuta un aggiornamento che non provenga da qui.
+
+---
+
 ## Come funziona
 
 | Parte | Come |
