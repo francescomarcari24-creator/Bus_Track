@@ -17,8 +17,8 @@ android {
         targetSdk = 37
         // Ad ogni versione pubblicata su GitHub: versionCode +1 (deve crescere per installare
         // l'aggiornamento sopra la versione precedente) e versionName aggiornato.
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

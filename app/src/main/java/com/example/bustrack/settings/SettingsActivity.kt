@@ -231,6 +231,8 @@ private fun SettingsScreen(onBack: () -> Unit) {
             Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
         }
 
+        AppVersionSection()
+
         Section("Fonti dei dati")
         Text(
             "Orari, fermate, posizioni dei mezzi e avvisi: Roma Mobilità (dati aperti GTFS e GTFS-Realtime).\n" +
@@ -329,6 +331,45 @@ private fun PlacePickerDialog(
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
     )
+}
+
+/** Versione installata e controllo manuale degli aggiornamenti su GitHub. */
+@Composable
+private fun AppVersionSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val installed = remember { com.example.bustrack.update.UpdateChecker.installedVersion(context) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var url by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    Section("App")
+    Text("Versione $installed", style = MaterialTheme.typography.bodyMedium)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        FilledTonalButton(
+            enabled = !checking,
+            onClick = {
+                checking = true
+                scope.launch {
+                    val latest = com.example.bustrack.update.UpdateChecker.check(context, force = true)
+                    checking = false
+                    when {
+                        latest == null -> { message = "GitHub non raggiungibile: riprova più tardi"; url = null }
+                        com.example.bustrack.update.UpdateChecker.isNewer(latest.version, installed) -> {
+                            message = "Disponibile la versione ${latest.version}"; url = latest.url
+                        }
+                        else -> { message = "Hai l'ultima versione"; url = null }
+                    }
+                }
+            },
+        ) { Text(if (checking) "Controllo…" else "Cerca aggiornamenti") }
+        url?.let { u ->
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u)))
+            }) { Text("Scarica") }
+        }
+    }
+    message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @Composable

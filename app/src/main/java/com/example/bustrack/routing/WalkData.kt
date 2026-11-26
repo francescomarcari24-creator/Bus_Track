@@ -23,6 +23,8 @@ class WalkData(
     val footFrom: IntArray,
     val footTo: IntArray,
     val footMeters: IntArray,
+    /** Lunghezza degli stessi cambi evitando le scale (uguale a [footMeters] se non si può). */
+    val footMetersFlat: IntArray,
     private val geomStart: IntArray,
     private val geom: ByteArray,
 ) {
@@ -51,7 +53,8 @@ class WalkData(
         fun parse(b: ByteBuffer): WalkData {
             val magic = ByteArray(4).also { b.get(it) }
             check(String(magic, Charsets.US_ASCII) == "BTW1") { "walk.bin non valido" }
-            check(b.int == 1) { "Versione di walk.bin non supportata" }
+            val version = b.int
+            check(version in 1..2) { "Versione di walk.bin non supportata" }
             val n = b.int
             val e = b.int
             val nameCount = b.int
@@ -86,6 +89,7 @@ class WalkData(
             val footFrom = ints(footCount)
             val footTo = ints(footCount)
             val footMeters = ushorts(footCount)
+            val footMetersFlat = if (version >= 2) ushorts(footCount) else footMeters
             val geom = ByteArray(geomStart[e]).also { b.get(it) }
 
             val graph = WalkGraph(
@@ -98,7 +102,7 @@ class WalkData(
                 edgeKind = kind,
                 names = names,
             )
-            return WalkData(graph, stopIds, stopNode, stopGap, footFrom, footTo, footMeters, geomStart, geom)
+            return WalkData(graph, stopIds, stopNode, stopGap, footFrom, footTo, footMeters, footMetersFlat, geomStart, geom)
         }
     }
 }

@@ -26,7 +26,29 @@ internal fun Context.isLocationEnabled(): Boolean =
  * Null senza permesso, con la localizzazione spenta o se non arriva nessuna posizione.
  */
 @SuppressLint("MissingPermission") // permesso verificato all'inizio
-internal suspend fun Context.currentLocation(maxAgeMs: Long = 120_000, timeoutMs: Long = 15_000): Location? {
+internal suspend fun Context.currentLocation(maxAgeMs: Long = 120_000, timeoutMs: Long = 15_000): Location? =
+    findLocation(maxAgeMs, timeoutMs)?.also { saveLastLocation(it) }
+
+/** Ultima posizione trovata dall'app (es. per il widget "Verso casa", che ad app chiusa non può chiederla). */
+data class SavedLocation(val lat: Double, val lon: Double, val timeMs: Long)
+
+internal fun Context.saveLastLocation(loc: Location) {
+    getSharedPreferences("last_location", Context.MODE_PRIVATE).edit()
+        .putString("lat", loc.latitude.toString())
+        .putString("lon", loc.longitude.toString())
+        .putLong("time", System.currentTimeMillis())
+        .apply()
+}
+
+internal fun Context.lastSavedLocation(): SavedLocation? {
+    val p = getSharedPreferences("last_location", Context.MODE_PRIVATE)
+    val lat = p.getString("lat", null)?.toDoubleOrNull() ?: return null
+    val lon = p.getString("lon", null)?.toDoubleOrNull() ?: return null
+    return SavedLocation(lat, lon, p.getLong("time", 0))
+}
+
+@SuppressLint("MissingPermission") // permesso verificato all'inizio
+private suspend fun Context.findLocation(maxAgeMs: Long, timeoutMs: Long): Location? {
     if (!hasLocationPermission()) return null
     val lm = getSystemService(LocationManager::class.java) ?: return null
     if (!lm.isLocationEnabled) return null

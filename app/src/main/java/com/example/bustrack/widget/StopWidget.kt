@@ -261,6 +261,7 @@ class StopWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
-        StopWidgetWorker.cancel(context)
+        // L'aggiornamento periodico serve anche al widget "Verso casa".
+        if (!StopWidgetWorker.anyWidget(context)) StopWidgetWorker.cancel(context)
     }
 }

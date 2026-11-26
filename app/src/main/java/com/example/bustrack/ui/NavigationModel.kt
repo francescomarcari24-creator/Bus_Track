@@ -329,6 +329,10 @@ class NavigationModel(
         }
     }
 
+    /** Percorso consigliato da [origin] a [dest] in partenza adesso (per il widget "Verso casa"). */
+    suspend fun bestJourney(origin: Place, dest: Place): JourneyView? =
+        (compute(origin, dest) as? PlanStatus.Ready)?.journeys?.firstOrNull()
+
     /** Percorsi da [origin] a [dest] in partenza adesso, con i dati live se raggiungibili. */
     private suspend fun compute(origin: Place, dest: Place, onSearching: () -> Unit = {}): PlanStatus {
         val now = System.currentTimeMillis() / 1000

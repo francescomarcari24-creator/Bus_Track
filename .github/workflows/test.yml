@@ -1,0 +1,37 @@
+# Test automatici: a ogni push su main e a ogni pull request GitHub compila l'app ed esegue i test
+# unitari (motore dei percorsi, grafo pedonale, feed, preferiti...). Non serve la chiave di firma.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stesso JDK di Android Studio (JetBrains Runtime 25).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test unitari
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Risultati dei test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: risultati-test
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7

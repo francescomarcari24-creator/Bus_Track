@@ -551,6 +551,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             val homeOnScreen = LocalTabOnScreen.current
             LaunchedEffect(homeOnScreen, inPreview) { if (homeOnScreen && !inPreview) vm.navigation.refreshShortcuts() }
             val navShortcuts by vm.navigation.shortcuts.collectAsStateWithLifecycle()
+            val appUpdate by com.example.bustrack.update.UpdateChecker.available.collectAsStateWithLifecycle()
             // Riordino dei preferiti trascinandoli (nell'elenco "home").
             val favoritesReorder = remember { ReorderState(memory.list("home")) }
             val navigateTo = LocalNavigateTo.current
@@ -670,6 +671,18 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                                         onOpenStop = vm::selectStop,
                                     )
                                 } else {
+                                    // Nuova versione dell'app su GitHub: riquadro in cima ai preferiti.
+                                    appUpdate?.let { u ->
+                                        item(key = "app-update") {
+                                            UpdateBanner(
+                                                version = u.version,
+                                                onDownload = {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url)))
+                                                },
+                                                onLater = { com.example.bustrack.update.UpdateChecker.dismiss(context) },
+                                            )
+                                        }
+                                    }
                                     if (navShortcuts.isNotEmpty()) {
                                         item(key = "nav-shortcuts") {
                                             NavShortcutPills(
@@ -1373,6 +1386,33 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
                     .reorderable(reorder, key, stopKeys, vm::moveFavoriteStop)
                     .clickable { vm.selectStop(stop) },
             ) { Text(stop.name) }
+        }
+    }
+}
+
+/** Riquadro "È disponibile una nuova versione" in cima alla Home, con "Scarica" e "Più tardi". */
+@Composable
+private fun UpdateBanner(version: String, onDownload: () -> Unit, onLater: () -> Unit) {
+    Surface(
+        shape = CardCorner,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 4.dp),
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+            Text(
+                "È disponibile Bus Track $version",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                "Scaricala da GitHub: si installa sopra questa, preferiti e impostazioni restano.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onLater) { Text("Più tardi") }
+                TextButton(onClick = onDownload) { Text("Scarica") }
+            }
         }
     }
 }

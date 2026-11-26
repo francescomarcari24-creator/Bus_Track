@@ -35,7 +35,7 @@ object RoutingEngine {
                     if (c.moveToFirst()) c.getString(0) else ""
                 }
             }.getOrDefault("")
-            val dataKey = "$gtfsVersion|walk1"
+            val dataKey = "$gtfsVersion|walk2"
             val key = "$today|$dataKey"
             planner?.takeIf { plannerKey == key }?.let { return@withLock it }
             val started = System.nanoTime()

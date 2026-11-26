@@ -78,6 +78,12 @@ class Timetable(
         )
     }
 
+    /** Copia con altre durate dei cambi a piedi (es. quelle senza scale), stessi cambi e corse. */
+    fun withFootSec(sec: IntArray): Timetable = Timetable(
+        stopCount, routeStopStart, routeStops, routeOffsets, routeTripStart, tripStart, tripRef,
+        footStart, footTo, sec,
+    )
+
     fun stopAt(route: Int, pos: Int) = routeStops[routeStopStart[route] + pos]
     fun offsetAt(route: Int, pos: Int) = routeOffsets[routeStopStart[route] + pos]
     fun routeLength(route: Int) = routeStopStart[route + 1] - routeStopStart[route]

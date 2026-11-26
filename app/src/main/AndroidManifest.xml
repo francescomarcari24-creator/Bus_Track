@@ -60,6 +60,18 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/stop_widget_info" />
         </receiver>
+        <!-- Widget "Verso casa": prossimo percorso verso Casa o Lavoro. -->
+        <receiver
+            android:name=".widget.NavWidgetReceiver"
+            android:exported="true"
+            android:label="@string/nav_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/nav_widget_info" />
+        </receiver>
         <activity
             android:name=".widget.StopWidgetConfigActivity"
             android:exported="true"

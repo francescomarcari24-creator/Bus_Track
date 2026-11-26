@@ -2,4 +2,6 @@
     <string name="app_name">Bus Track</string>
     <string name="stop_widget_name">Prossimi passaggi</string>
     <string name="stop_widget_description">Prossimi passaggi a una fermata preferita</string>
+    <string name="nav_widget_name">Verso casa</string>
+    <string name="nav_widget_description">Il prossimo percorso verso casa o verso il lavoro</string>
 </resources>

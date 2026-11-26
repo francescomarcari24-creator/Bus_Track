@@ -114,8 +114,10 @@ class RoutePlanner(
         val fromGap = distanceMeters(fromLat, fromLon, graph.nodeLat[fromNode], graph.nodeLon[fromNode])
         val toGap = distanceMeters(toLat, toLon, graph.nodeLat[toNode], graph.nodeLon[toNode])
         val now = (departEpoch - dayStartEpoch).toInt()
-        val tt = live?.let { adjustedTimetable(it, now) } ?: day.timetable
-        val raptor = if (live == null) this.raptor else Raptor(tt)
+        // Evita le scale: cambi a piedi con le durate della via senza scale (pre-calcolate nel grafo).
+        val base = if (options.avoidStairs) day.timetable.withFootSec(day.footSecFlat) else day.timetable
+        val tt = live?.let { adjustedTimetable(base, it, now) } ?: base
+        val raptor = if (tt === day.timetable) this.raptor else Raptor(tt)
 
         // Evita le scale: ogni metro di scale vale come 15 metri di strada.
         val stairs = if (options.avoidStairs) 15.0 else 1.0
@@ -181,7 +183,7 @@ class RoutePlanner(
      *   servizio effettivamente in servizio (come negli arrivi, vedi dropUntrackedSchedules), ma
      *   solo vicino all'ora della partenza: più in là il servizio può cambiare.
      */
-    private fun adjustedTimetable(live: LiveInfo, now: Int): Timetable {
+    private fun adjustedTimetable(base: Timetable, live: LiveInfo, now: Int): Timetable {
         val delays = HashMap<Int, Int>()
         for ((tripId, d) in live.delays) day.tripIndex[tripId]?.let { delays[it] = d }
         val groups = HashMap<String, MutableSet<String>>()
@@ -190,7 +192,7 @@ class RoutePlanner(
             val service = t.serviceId ?: continue
             groups.getOrPut(t.routeId) { HashSet() } += com.example.bustrack.gtfs.serviceGroup(service)
         }
-        return day.timetable.adjusted(
+        return base.adjusted(
             delay = { delays[it] ?: 0 },
             keep = { ref, start ->
                 val t = day.trips[ref]

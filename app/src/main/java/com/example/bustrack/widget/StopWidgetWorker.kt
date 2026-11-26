@@ -13,11 +13,15 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 
-/** Aggiorna i widget delle fermate ogni 15 minuti (il minimo concesso da Android) quando c'è rete. */
+/**
+ * Aggiorna i widget (fermate e "Verso casa") ogni 15 minuti, il minimo concesso da Android, quando
+ * c'è rete; e subito su richiesta (tasto ↻, uscita dall'app).
+ */
 class StopWidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        StopWidget.refresh(applicationContext)
+        runCatching { StopWidget.refresh(applicationContext) }
+        runCatching { NavWidget.refresh(applicationContext) }
         return Result.success()
     }
 
@@ -45,9 +49,15 @@ class StopWidgetWorker(context: Context, params: WorkerParameters) : CoroutineWo
 
         /** Aggiorna i widget solo se ce n'è almeno uno sulla schermata principale. */
         fun runNowIfAny(context: Context) {
+            if (anyWidget(context)) runNow(context)
+        }
+
+        /** C'è almeno un widget dell'app (fermata o "Verso casa") sulla schermata principale. */
+        fun anyWidget(context: Context): Boolean {
             val manager = android.appwidget.AppWidgetManager.getInstance(context)
-            val ids = manager.getAppWidgetIds(android.content.ComponentName(context, StopWidgetReceiver::class.java))
-            if (ids.isNotEmpty()) runNow(context)
+            return listOf(StopWidgetReceiver::class.java, NavWidgetReceiver::class.java).any {
+                manager.getAppWidgetIds(android.content.ComponentName(context, it)).isNotEmpty()
+            }
         }
 
         fun cancel(context: Context) {

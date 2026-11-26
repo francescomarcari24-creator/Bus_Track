@@ -192,3 +192,15 @@ class StairsTest {
         assertEquals(400.0, flat.distanceTo(2)!!, 0.01) // metri veri, non il "costo"
     }
 }
+
+class UpdateCheckerTest {
+    @Test
+    fun comparesVersionsNumberByNumber() {
+        val u = com.example.bustrack.update.UpdateChecker
+        assertTrue(u.isNewer("1.0.1", "1.0.0"))
+        assertTrue(u.isNewer("1.10.0", "1.9.2"))
+        assertTrue(u.isNewer("2.0", "1.9.9"))
+        assertTrue(!u.isNewer("1.0.0", "1.0.0"))
+        assertTrue(!u.isNewer("1.0.0", "1.0.1"))
+    }
+}

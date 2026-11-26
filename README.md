@@ -1,5 +1,8 @@
 # Bus Track
 
+[![Test](https://github.com/francescomarcari24-creator/Bus_Track/actions/workflows/test.yml/badge.svg)](https://github.com/francescomarcari24-creator/Bus_Track/actions/workflows/test.yml)
+[![Ultima versione](https://img.shields.io/github/v/release/francescomarcari24-creator/Bus_Track?label=versione)](https://github.com/francescomarcari24-creator/Bus_Track/releases/latest)
+
 > [!IMPORTANT]
 > **Funziona solo a Roma.** Orari, fermate, dati in tempo reale e rete pedonale sono quelli di Roma (Roma Mobilità e OpenStreetMap dell'area romana): in altre città l'app non trova linee né percorsi.
 
@@ -38,7 +41,7 @@ I dati sono quelli aperti di **Roma Mobilità** (orari GTFS e feed in tempo real
 - Partenza dalla posizione attuale o da un luogo scelto; arrivo cercando una fermata, un indirizzo o un luogo, oppure scegliendolo sulla mappa.
 - Percorsi calcolati **sul telefono** con l'algoritmo **RAPTOR**, usando gli orari del giorno **corretti con i ritardi in tempo reale**.
 - **Tratti a piedi sulla rete pedonale reale** (OpenStreetMap), con **indicazioni strada per strada** ("Gira a destra in Via Milano e prosegui per 120 m").
-- **Preferenze**: meno tratti a piedi, meno cambi, evita la metro, evita il tram, evita le scale.
+- **Preferenze**: meno tratti a piedi, meno cambi, evita la metro, evita il tram, evita le scale (anche nei cambi a piedi tra fermate).
 - **Avvisi di servizio** sulle linee e paline del percorso.
 - Durante il viaggio:
   - elenco dei passi con attese, orari live e posizione del mezzo;
@@ -50,7 +53,8 @@ I dati sono quelli aperti di **Roma Mobilità** (orari GTFS e feed in tempo real
 
 ### Altro
 - **Avvisi** di servizio attivi, con ricerca per linea; notifiche dei nuovi avvisi su linee e fermate preferite.
-- **Widget** "prossimi passaggi" di una fermata per la schermata principale.
+- **Widget** "prossimi passaggi" di una fermata e **widget "Verso casa"** (a che ora partire e arrivare verso Casa, o verso il Lavoro se sei a casa).
+- **Avviso di nuova versione**: l'app controlla le Release di GitHub e propone l'aggiornamento.
 - **Scorciatoie dall'icona** dell'app: "Vai a casa" e "Vai a lavoro".
 - **Funziona anche senza rete** per orari, fermate e calcolo dei percorsi (solo i dati live e la ricerca degli indirizzi richiedono la connessione).
 - **Aggiornamento automatico degli orari** quando Roma Mobilità ne pubblica di nuovi (anche solo in Wi-Fi).
@@ -150,7 +154,7 @@ tools/             script Python per rigenerare orari e rete pedonale
 
 ## Privacy
 
-L'app non ha account, server o statistiche d'uso. La posizione si usa solo sul telefono (fermate vicine, navigazione) e non viene inviata a nessuno. Le uniche connessioni sono verso i feed di Roma Mobilità, le mappe di OpenFreeMap e il geocoder di Android per cercare gli indirizzi.
+L'app non ha account, server o statistiche d'uso. La posizione si usa solo sul telefono (fermate vicine, navigazione) e non viene inviata a nessuno. Le uniche connessioni sono verso i feed di Roma Mobilità, le mappe di OpenFreeMap, il geocoder di Android per cercare gli indirizzi e GitHub per sapere se c'è una nuova versione (al massimo ogni 12 ore, senza inviare dati).
 
 ## Dati e attribuzioni
 

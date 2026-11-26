@@ -7,6 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import com.example.bustrack.gtfs.update.GtfsUpdateWorker
 import com.example.bustrack.ui.BusTrackApp
 import com.example.bustrack.ui.theme.BusTrackTheme
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,6 +30,8 @@ class MainActivity : ComponentActivity() {
             com.example.bustrack.watch.FavoriteAlertsWorker.schedule(this)
         }
         enableEdgeToEdge()
+        // Nuova versione dell'app su GitHub (al massimo ogni 12 ore): proposta nella Home.
+        lifecycleScope.launch { com.example.bustrack.update.UpdateChecker.check(this@MainActivity) }
         // Controllo giornaliero di nuovi orari e fermate di Roma Mobilità (se già pianificato non cambia nulla).
         GtfsUpdateWorker.schedule(this)
         setContent {

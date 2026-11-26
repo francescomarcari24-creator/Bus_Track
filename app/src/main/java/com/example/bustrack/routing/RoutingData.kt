@@ -37,6 +37,8 @@ class DayTimetable(
     val trips: Array<TripInfo>,
     /** route_type GTFS di ogni percorso RAPTOR (0 tram, 1 metro, 3 bus, ...). */
     val routeType: IntArray,
+    /** Durate dei cambi a piedi evitando le scale (stesse posizioni di [Timetable.footSec]). */
+    val footSecFlat: IntArray,
 ) {
     /** trip_id → indice in [trips], per agganciare i dati live. */
     val tripIndex: Map<String, Int> by lazy {
@@ -128,19 +130,22 @@ object TimetableLoader {
         }
 
         // Cambi a piedi reali dal grafo pedonale.
-        val footLists = Array(stopIds.size) { ArrayList<Pair<Int, Int>>(4) }
+        // (per ogni cambio: fermata d'arrivo, secondi, secondi evitando le scale)
+        val footLists = Array(stopIds.size) { ArrayList<Triple<Int, Int, Int>>(4) }
         for (k in walk.footFrom.indices) {
             val f = stopIndex[walk.stopIds[walk.footFrom[k]]] ?: continue
             val t = stopIndex[walk.stopIds[walk.footTo[k]]] ?: continue
-            footLists[f] += t to (walk.footMeters[k] / WALK_SPEED_MPS).toInt()
+            footLists[f] += Triple(t, (walk.footMeters[k] / WALK_SPEED_MPS).toInt(), (walk.footMetersFlat[k] / WALK_SPEED_MPS).toInt())
         }
         val footStart = IntArray(stopIds.size + 1)
         for (s in stopIds.indices) footStart[s + 1] = footStart[s] + footLists[s].size
         val footTo = IntArray(footStart.last())
         val footSec = IntArray(footStart.last())
-        for (s in stopIds.indices) footLists[s].forEachIndexed { j, (t, sec) ->
+        val footSecFlat = IntArray(footStart.last())
+        for (s in stopIds.indices) footLists[s].forEachIndexed { j, (t, sec, flat) ->
             footTo[footStart[s] + j] = t
             footSec[footStart[s] + j] = sec
+            footSecFlat[footStart[s] + j] = flat
         }
 
         val types = gtfs.rawQuery("SELECT route_id, route_type FROM routes", null).use { c ->
@@ -152,7 +157,7 @@ object TimetableLoader {
 
         val tt = Timetable(stopIds.size, routeStopStart, routeStops, routeOffsets, routeTripStart, tripStart, tripRef, footStart, footTo, footSec)
         Log.i(TAG, "Orari di $date: ${routeIds.size} percorsi, ${tripStart.size} corse in ${(System.nanoTime() - started) / 1_000_000} ms")
-        return DayTimetable(date, tt, stopIds, stopIndex, tripInfos.toTypedArray(), routeType)
+        return DayTimetable(date, tt, stopIds, stopIndex, tripInfos.toTypedArray(), routeType, footSecFlat)
     }
 
     internal fun indexOf(stopIds: Array<String>): Map<String, Int> =
@@ -165,7 +170,7 @@ object TimetableLoader {
  * Il nome del file contiene giorno e versione dei dati (GTFS e grafo): se cambiano si ricostruisce.
  */
 object TimetableCache {
-    private const val FORMAT = 2
+    private const val FORMAT = 3
     private const val PREFIX = "timetable-"
 
     private fun file(context: Context, date: LocalDate, dataKey: String) =
@@ -209,6 +214,7 @@ object TimetableCache {
         ints(t.routeTripStart); ints(t.tripStart); ints(t.tripRef)
         ints(t.footStart); ints(t.footTo); ints(t.footSec)
         ints(d.routeType)
+        ints(d.footSecFlat)
         o.writeInt(d.trips.size)
         d.trips.forEach { tr ->
             str(tr.tripId); str(tr.routeId); str(tr.headsign ?: ""); str(tr.serviceId ?: "")
@@ -232,10 +238,11 @@ object TimetableCache {
         val routeTripStart = ints(); val tripStart = ints(); val tripRef = ints()
         val footStart = ints(); val footTo = ints(); val footSec = ints()
         val routeType = ints()
+        val footSecFlat = ints()
         val trips = Array(b.int) {
             TripInfo(str(), str(), str().ifEmpty { null }, str().ifEmpty { null })
         }
         val tt = Timetable(stopIds.size, routeStopStart, routeStops, routeOffsets, routeTripStart, tripStart, tripRef, footStart, footTo, footSec)
-        return DayTimetable(date, tt, stopIds, TimetableLoader.indexOf(stopIds), trips, routeType)
+        return DayTimetable(date, tt, stopIds, TimetableLoader.indexOf(stopIds), trips, routeType, footSecFlat)
     }
 }
