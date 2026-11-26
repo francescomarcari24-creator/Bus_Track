@@ -15,14 +15,14 @@ Ultimo aggiornamento: 2026-11-24
 |---|---|
 | Build debug | `./gradlew :app:assembleDebug` |
 | Build release (quella da provare: molto più fluida) | `./gradlew :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk` (firmata con la chiave di debug, si installa sopra la debug) |
-| Dopo l'installazione della release | `adb -s RFCTC0EWJAD shell cmd package compile -m speed-profile -f com.example.bustrack` (applica subito i profili di compilazione) |
+| Dopo l'installazione della release | `adb -s <seriale> shell cmd package compile -m speed-profile -f com.example.bustrack` (applica subito i profili di compilazione) |
 | Test unitari (JVM) | `./gradlew :app:testDebugUnitTest` |
-| Installa sul telefono | `adb -s RFCTC0EWJAD install -r app/build/outputs/apk/debug/app-debug.apk` |
-| Avvia l'app | `adb -s RFCTC0EWJAD shell am start -n com.example.bustrack/.MainActivity` |
+| Installa sul telefono | `adb -s <seriale> install -r app/build/outputs/apk/debug/app-debug.apk` |
+| Avvia l'app | `adb -s <seriale> shell am start -n com.example.bustrack/.MainActivity` |
 | Log dei download dei feed | `adb logcat -s BusTrack` |
 | Rigenera il database statico | `python tools/build_gtfs_db.py <rome_static_gtfs.zip> app/src/main/assets/gtfs.db` |
 
-- **Le prove si fanno sul telefono collegato** (Samsung Galaxy S23, `SM-S911B`, seriale adb `RFCTC0EWJAD`, 1080×2340, tema scuro, colori dinamici), **non sull'emulatore**.
+- **Le prove si fanno sul telefono collegato** (telefono Android di prova, 1080×2340, tema scuro, colori dinamici), **non sull'emulatore**.
 - Per pilotare la UI via adb: toccare gli elementi cercando testo / `content-desc` con `uiautomator dump`, non a coordinate fisse. Per scrivere nella ricerca toccare `class="android.widget.EditText"`. **Chiudere la tastiera Samsung prima di scorrere** (`input keyevent 4` se `mInputShown=true`; ESC non la chiude).
 - Git: branch `main` (rinominato da `master` il 2026-11-23), primo commit il 2026-11-23 (autore "Francesco Marcari", identità Git impostata globalmente). Fare commit e push solo se richiesto.
 - GitHub: `origin` = https://github.com/francescomarcari24-creator/Bus_Track (push via HTTPS; la GitHub CLI `gh` è installata e autenticata).
@@ -288,3 +288,4 @@ Formato: data — cosa è cambiato (file principali).
 87. **Widget della fermata corretto** (`StopWidget`): il tocco per aprire la fermata vale solo su nome e passaggi; il tasto ↻ ha un'area sua di 48 dp (prima 32 dp dentro un widget tutto cliccabile: toccando vicino all'icona si apriva la fermata). Toccando ↻ compare subito una rotellina (`KEY_REFRESHING_SINCE`, scade dopo 1 minuto) e il download passa al lavoro di sistema `StopWidgetWorker.runNow` (prima girava nel tempo concesso al tocco, ~10 s, e con il feed lento veniva interrotto senza aggiornare).
 88. **README e licenza**: `README.md` per GitHub (cosa fa l'app, come funziona, tecnologie, compilazione, rigenerazione dei dati, struttura, privacy, attribuzioni) e `LICENSE` MIT (codice; i dati restano sotto le loro condizioni).
 89. **Pubblicazione su GitHub** (Release): variante di build `publish` (= release, firmata con la chiave di rilascio `C:/Users/franc/BusTrack-firma/bustrack-release.jks`, alias `bustrack`, letta da `keystore.properties` nella radice del progetto, esclusa da git con `*.jks`; copia della password in `BusTrack-firma/keystore.properties.copia`). **Conservare chiave e password con una copia fuori dal PC**: senza, gli aggiornamenti pubblicati non si installano sopra le versioni precedenti. La `release` resta firmata con la chiave di debug per il telefono di prova. Per pubblicare: alzare `versionCode` (+1) e `versionName`, `./gradlew :app:assemblePublish`, `gh release create vX.Y.Z app/build/outputs/apk/publish/app-publish.apk#BusTrack-X.Y.Z.apk`. README: sezione "Scaricare l'app". Prima versione pubblicata: **1.0.0** (versionCode 1).
+90. **Repository pubblico**: README con l'avviso in evidenza che l'app funziona solo a Roma; tolti da questi appunti modello e seriale adb del telefono di prova (`<seriale>`); commit di questo repository con l'email anonima di GitHub (`git config user.email` locale).

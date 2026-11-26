@@ -1,5 +1,8 @@
 # Bus Track
 
+> [!IMPORTANT]
+> **Funziona solo a Roma.** Orari, fermate, dati in tempo reale e rete pedonale sono quelli di Roma (Roma Mobilità e OpenStreetMap dell'area romana): in altre città l'app non trova linee né percorsi.
+
 App Android per muoversi a **Roma** con i mezzi pubblici: arrivi in tempo reale alle fermate, posizione dei bus sulla mappa, avvisi di servizio e un **navigatore da un punto A a un punto B** che calcola i percorsi direttamente sul telefono, con le indicazioni a piedi strada per strada.
 
 I dati sono quelli aperti di **Roma Mobilità** (orari GTFS e feed in tempo reale GTFS-Realtime); mappe e rete pedonale vengono da **OpenStreetMap**.
@@ -65,7 +68,7 @@ L'app non è sul Play Store: si installa scaricando il pacchetto (APK) dalle **R
 
 Per **aggiornare**, scarica e installa la versione nuova allo stesso modo: si installa sopra quella vecchia e preferiti e impostazioni restano.
 
-Serve Android **14** o successivo su un telefono con processore **arm64** (praticamente tutti quelli recenti). Ogni versione è firmata con la stessa chiave: Android rifiuta un aggiornamento che non provenga da qui.
+Serve Android **14** o successivo su un telefono con processore **arm64** (praticamente tutti quelli recenti). L'app è utile **solo a Roma**. Ogni versione è firmata con la stessa chiave: Android rifiuta un aggiornamento che non provenga da qui.
 
 ---
 
@@ -90,6 +93,7 @@ Serve Android **14** o successivo su un telefono con processore **arm64** (prati
 
 ## Requisiti
 
+- Usarla a **Roma**: i dati coprono solo il trasporto pubblico romano
 - Android **14** o successivo, processore **arm64** (praticamente tutti i telefoni recenti)
 - Permessi: posizione (fermate vicine, navigazione), notifiche (avvisi e navigazione)
 
