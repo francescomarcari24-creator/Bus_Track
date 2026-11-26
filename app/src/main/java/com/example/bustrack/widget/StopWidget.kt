@@ -56,7 +56,8 @@ import java.time.format.DateTimeFormatter
  * Widget "prossimi passaggi" di una fermata preferita: nome, prossimi 4 arrivi (linea, destinazione,
  * orario; verde se live) e ora dell'aggiornamento. Android aggiorna i widget al massimo ogni
  * 15 minuti (vedi [StopWidgetWorker]), quindi si mostra l'orario di arrivo e non i minuti mancanti,
- * che invecchierebbero; il tasto ↻ aggiorna subito. Toccandolo si apre l'app su quella fermata.
+ * che invecchierebbero; il tasto ↻ aggiorna subito (rotellina finché arrivano i dati). Toccando il
+ * nome o i passaggi si apre l'app su quella fermata; il tasto ↻ ha un'area sua, separata.
  */
 class StopWidget : GlanceAppWidget() {
 
@@ -73,6 +74,8 @@ class StopWidget : GlanceAppWidget() {
         val rows = prefs[KEY_ROWS].orEmpty().lines().filter { it.isNotBlank() }.map { it.split('\t') }
         val updatedAt = prefs[KEY_UPDATED_AT]
         val error = prefs[KEY_ERROR]
+        // Aggiornamento chiesto col tasto ↻ e non ancora finito (oltre un minuto si considera perso).
+        val refreshing = prefs[KEY_REFRESHING_SINCE]?.let { System.currentTimeMillis() - it < 60_000 } == true
         val open = stopId?.let {
             actionStartActivity(
                 Intent(androidx.glance.LocalContext.current, MainActivity::class.java)
@@ -86,24 +89,43 @@ class StopWidget : GlanceAppWidget() {
                 .appWidgetBackground()
                 .cornerRadius(24.dp)
                 .background(GlanceTheme.colors.widgetBackground)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .let { if (open != null) it.clickable(open) else it },
+                .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 10.dp),
         ) {
+            // Intestazione: il nome apre la fermata, il tasto ↻ (area di 48 dp, tutta sua) aggiorna.
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stopName,
                     maxLines = 1,
                     style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, color = GlanceTheme.colors.onSurface),
-                    modifier = GlanceModifier.defaultWeight(),
+                    modifier = GlanceModifier.defaultWeight().let { if (open != null) it.clickable(open) else it },
                 )
-                Image(
-                    ImageProvider(R.drawable.ic_refresh),
-                    contentDescription = "Aggiorna",
-                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.primary),
-                    modifier = GlanceModifier.size(32.dp).padding(4.dp).clickable(actionRunCallback<RefreshAction>()),
-                )
+                Box(
+                    GlanceModifier.size(48.dp).cornerRadius(24.dp).clickable(actionRunCallback<RefreshAction>()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (refreshing) {
+                        androidx.glance.appwidget.CircularProgressIndicator(
+                            modifier = GlanceModifier.size(22.dp),
+                            color = GlanceTheme.colors.primary,
+                        )
+                    } else {
+                        Image(
+                            ImageProvider(R.drawable.ic_refresh),
+                            contentDescription = "Aggiorna",
+                            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.primary),
+                            modifier = GlanceModifier.size(24.dp),
+                        )
+                    }
+                }
             }
-            Spacer(GlanceModifier.height(4.dp))
+            // Passaggi e ora dell'aggiornamento: toccandoli si apre la fermata.
+            Column(
+                GlanceModifier
+                    .fillMaxWidth()
+                    .defaultWeight()
+                    .padding(end = 10.dp)
+                    .let { if (open != null) it.clickable(open) else it },
+            ) {
             when {
                 stopId == null -> Message("Fermata non scelta: rimuovi e aggiungi di nuovo il widget.")
                 rows.isEmpty() && error != null -> Message(error)
@@ -117,6 +139,7 @@ class StopWidget : GlanceAppWidget() {
                     "aggiornato alle " + HHMM.format(Instant.ofEpochMilli(updatedAt)) + (error?.let { " · non aggiornato" } ?: ""),
                     style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
                 )
+            }
             }
         }
     }
@@ -174,6 +197,8 @@ class StopWidget : GlanceAppWidget() {
         val KEY_ROWS = stringPreferencesKey("rows")
         val KEY_UPDATED_AT = longPreferencesKey("updated_at")
         val KEY_ERROR = stringPreferencesKey("error")
+        /** Quando è stato toccato ↻ (epoch ms): finché l'aggiornamento non finisce si vede la rotellina. */
+        val KEY_REFRESHING_SINCE = longPreferencesKey("refreshing_since")
         private const val MAX_ROWS = 4
         private val HHMM = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.of("Europe/Rome"))
 
@@ -204,6 +229,7 @@ class StopWidget : GlanceAppWidget() {
                         }.onFailure {
                             this[KEY_ERROR] = "Passaggi non disponibili"
                         }
+                        remove(KEY_REFRESHING_SINCE)
                     }
                 }
                 StopWidget().update(context, id)
@@ -215,7 +241,13 @@ class StopWidget : GlanceAppWidget() {
 /** Tasto ↻ del widget: aggiorna subito quel widget. */
 class RefreshAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        StopWidget.refresh(context, glanceId)
+        // Subito la rotellina; il download lo fa un lavoro di sistema, che arriva in fondo anche se
+        // il feed è lento (qui Android concede solo pochi secondi e poi interrompe).
+        updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { p ->
+            p.toMutablePreferences().apply { this[StopWidget.KEY_REFRESHING_SINCE] = System.currentTimeMillis() }
+        }
+        StopWidget().update(context, glanceId)
+        StopWidgetWorker.runNow(context)
     }
 }
 

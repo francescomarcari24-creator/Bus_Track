@@ -467,6 +467,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                 Spacer(Modifier.width(RoundButtonGap))
                 RefreshButton(TransitViewModel.REFRESH_ARRIVALS in refreshing, onClick = vm::refreshArrivals)
             }
+            // Aria tra i tasti tondi e il titolo.
+            Spacer(Modifier.height(12.dp))
             Text(selected.name, style = MaterialTheme.typography.headlineSmall)
             Text("Palina ${selected.code ?: selected.id}", style = MaterialTheme.typography.bodyMedium)
             if (state.routes.isNotEmpty()) {
@@ -549,6 +551,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
             val homeOnScreen = LocalTabOnScreen.current
             LaunchedEffect(homeOnScreen, inPreview) { if (homeOnScreen && !inPreview) vm.navigation.refreshShortcuts() }
             val navShortcuts by vm.navigation.shortcuts.collectAsStateWithLifecycle()
+            // Riordino dei preferiti trascinandoli (nell'elenco "home").
+            val favoritesReorder = remember { ReorderState(memory.list("home")) }
             val navigateTo = LocalNavigateTo.current
             // Pillola "Preferiti / Vicine": stesso aspetto e comportamento della barra in basso
             // (si tocca o si trascina l'indicatore, e l'elenco sotto scorre insieme a lui).
@@ -645,6 +649,8 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                                     bottom = (LocalBottomBarInset.current - HomePanelGap).coerceAtLeast(0.dp),
                                 ),
                                 modifier = Modifier.fillMaxSize(),
+                                // Durante il riordino dei preferiti l'elenco non scorre.
+                                userScrollEnabled = !(pane == 0 && favoritesReorder.scrollLocked),
                             ) {
                                 if (pane == 1) {
                                     nearbySection(
@@ -673,7 +679,7 @@ private fun StopsPageContent(page: StopsPage, state: StopsState, favorites: Favo
                                             )
                                         }
                                     }
-                                    favoritesSection(favorites, vm)
+                                    favoritesSection(favorites, vm, favoritesReorder)
                                 }
                             }
                         }
@@ -1326,7 +1332,7 @@ internal fun AlertCard(a: ServiceAlert) {
 }
 
 /** Preferiti nella schermata iniziale (mostrati quando la ricerca è vuota). */
-private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: TransitViewModel) {
+private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: TransitViewModel, reorder: ReorderState) {
     if (!favorites.loaded) return
     if (favorites.lines.isEmpty() && favorites.stops.isEmpty()) {
         item {
@@ -1341,20 +1347,31 @@ private fun LazyListScope.favoritesSection(favorites: FavoritesState, vm: Transi
     }
     if (favorites.lines.isNotEmpty()) {
         item { SectionTitle("Linee preferite", alignToListItems = true) }
+        // Tenendo premuto e trascinando si cambia l'ordine (linee tra loro, fermate tra loro).
+        val lineKeys = favorites.lines.map { "fav-line-${it.route.id}-${it.pattern.directionId}" }
         items(favorites.lines, key = { "fav-line-${it.route.id}-${it.pattern.directionId}" }) { fav ->
+            val key = "fav-line-${fav.route.id}-${fav.pattern.directionId}"
             AppListItem(
                 leadingContent = { RouteBadge(fav.route.label) },
                 supportingContent = fav.pattern.fromStopName?.let { from -> { Text("da $from") } },
-                modifier = Modifier.clickable { vm.openFavoriteLine(fav) },
+                modifier = Modifier
+                    .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
+                    .reorderable(reorder, key, lineKeys, vm::moveFavoriteLine)
+                    .clickable { vm.openFavoriteLine(fav) },
             ) { Text("→ ${fav.pattern.headsign ?: "Direzione ${fav.pattern.directionId}"}") }
         }
     }
     if (favorites.stops.isNotEmpty()) {
         item { SectionTitle("Fermate preferite", alignToListItems = true) }
+        val stopKeys = favorites.stops.map { "fav-stop-" + it.id }
         items(favorites.stops, key = { "fav-stop-" + it.id }) { stop ->
+            val key = "fav-stop-" + stop.id
             AppListItem(
                 supportingContent = { Text("Palina ${stop.code ?: stop.id}") },
-                modifier = Modifier.clickable { vm.selectStop(stop) },
+                modifier = Modifier
+                    .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
+                    .reorderable(reorder, key, stopKeys, vm::moveFavoriteStop)
+                    .clickable { vm.selectStop(stop) },
             ) { Text(stop.name) }
         }
     }

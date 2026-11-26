@@ -171,3 +171,24 @@ class WalkDataTest {
         assertTrue(w.graph.shortestFrom(0, 500.0).let { t -> (0 until 2000).count { t.distanceTo(it) != null } } >= 0)
     }
 }
+
+class StairsTest {
+    @Test
+    fun avoidStairsTakesTheLongerFlatWay() {
+        // Da 0 a 2: via 1 con scale (100 + 100 m) oppure via 3 in piano (100 + 300 m).
+        val g = WalkGraph(
+            nodeLat = doubleArrayOf(41.9, 41.9, 41.901, 41.901),
+            nodeLon = doubleArrayOf(12.5, 12.501, 12.501, 12.5),
+            edgeA = intArrayOf(0, 1, 0, 3),
+            edgeB = intArrayOf(1, 2, 3, 2),
+            edgeLength = floatArrayOf(100f, 100f, 100f, 300f),
+            edgeName = intArrayOf(0, 0, 0, 0),
+            edgeKind = byteArrayOf(0, WalkGraph.KIND_STEPS, 0, 0),
+            names = arrayOf(""),
+        )
+        assertEquals(listOf(0, 1), g.shortestFrom(0, 1000.0).pathTo(2)!!.map { it.edge })
+        val flat = g.shortestFrom(0, 1000.0, stairsPenalty = 15.0)
+        assertEquals(listOf(2, 3), flat.pathTo(2)!!.map { it.edge })
+        assertEquals(400.0, flat.distanceTo(2)!!, 0.01) // metri veri, non il "costo"
+    }
+}

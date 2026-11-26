@@ -40,6 +40,8 @@ data class PlanOptions(
     val lessTransfers: Boolean = false,
     val noMetro: Boolean = false,
     val noTram: Boolean = false,
+    /** Percorsi a piedi senza scalinate, quando c'è un'alternativa. */
+    val avoidStairs: Boolean = false,
 )
 
 /**
@@ -115,8 +117,10 @@ class RoutePlanner(
         val tt = live?.let { adjustedTimetable(it, now) } ?: day.timetable
         val raptor = if (live == null) this.raptor else Raptor(tt)
 
-        val fromTree = graph.shortestFrom(fromNode, maxOf(accessMax, walkOnlyMax))
-        val toTree = graph.shortestFrom(toNode, accessMax)
+        // Evita le scale: ogni metro di scale vale come 15 metri di strada.
+        val stairs = if (options.avoidStairs) 15.0 else 1.0
+        val fromTree = graph.shortestFrom(fromNode, maxOf(accessMax, walkOnlyMax), stairs)
+        val toTree = graph.shortestFrom(toNode, accessMax, stairs)
 
         // Fermate raggiungibili a piedi dalla partenza, e da cui si raggiunge a piedi la meta.
         val sources = HashMap<Int, Int>()
@@ -150,7 +154,7 @@ class RoutePlanner(
         if (sources.isNotEmpty() && targets.isNotEmpty()) {
             val maxRides = if (options.lessTransfers) 3 else 5
             for (j in raptor.route(sources, targets, maxRides = maxRides, maxFootSec = maxFootSec, routeAllowed = allowed)) {
-                journeys += toJourney(tt, j, fromTree, toTree, fromGap, toGap, departEpoch) ?: continue
+                journeys += toJourney(tt, j, fromTree, toTree, fromGap, toGap, departEpoch, stairs) ?: continue
             }
         }
         if (journeys.isEmpty()) return Result.NoRoute
@@ -205,6 +209,8 @@ class RoutePlanner(
         fromGap: Double,
         toGap: Double,
         departEpoch: Long,
+        /** Peso delle scale (per i cambi a piedi tra fermate). */
+        stairs: Double,
     ): PlannedJourney? {
         val legs = ArrayList<JourneyLeg>()
         val firstRide = j.legs.firstOrNull { it is RaptorLeg.Ride } as RaptorLeg.Ride? ?: return null
@@ -240,7 +246,7 @@ class RoutePlanner(
                     val start = legs.last().arrival
                     val a = stopNode[leg.fromStop]
                     val b = stopNode[leg.toStop]
-                    val path = if (a >= 0 && b >= 0) graph.shortestFrom(a, 800.0).pathTo(b).orEmpty() else emptyList()
+                    val path = if (a >= 0 && b >= 0) graph.shortestFrom(a, 800.0, stairs).pathTo(b).orEmpty() else emptyList()
                     legs += JourneyLeg.Walk(
                         start, start + leg.seconds, (leg.seconds * WALK_SPEED_MPS).toInt(), path,
                         day.stopIds[leg.fromStop], day.stopIds[leg.toStop],

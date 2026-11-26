@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
@@ -158,7 +159,9 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Ogni modifica ai preferiti ricarica nomi e percorsi dal database statico.
         viewModelScope.launch {
-            favoritesStore.items.collect { items -> _favorites.value = resolveFavorites(items) }
+            // collectLatest: trascinando un preferito l'ordine cambia di continuo; vale solo l'ultimo
+            // (un caricamento vecchio non deve rimettere l'ordine di prima sotto il dito).
+            favoritesStore.items.collectLatest { items -> _favorites.value = resolveFavorites(items) }
         }
         // Cambiando il raggio nelle impostazioni si rifà la ricerca delle fermate vicine.
         // drop(1): il primo valore arriva subito, a costruzione non ancora finita; contano i cambi.
@@ -199,6 +202,30 @@ class TransitViewModel(app: Application) : AndroidViewModel(app) {
         // Elementi spariti da un nuovo GTFS statico vengono semplicemente saltati.
         val stops = runCatching { repo.stopsInOrder(stopIds) }.getOrDefault(emptyList())
         return FavoritesState(lines, stops, loaded = true)
+    }
+
+    /** Linea preferita spostata dalla posizione [from] a [to] (trascinata nella Home). */
+    fun moveFavoriteLine(from: Int, to: Int) {
+        val s = _favorites.value
+        if (from !in s.lines.indices || to !in s.lines.indices) return
+        // Subito sullo schermo (la riga resta sotto il dito), poi salvato.
+        _favorites.value = s.copy(lines = s.lines.toMutableList().apply { add(to, removeAt(from)) })
+        saveFavoriteOrder()
+    }
+
+    /** Fermata preferita spostata dalla posizione [from] a [to]. */
+    fun moveFavoriteStop(from: Int, to: Int) {
+        val s = _favorites.value
+        if (from !in s.stops.indices || to !in s.stops.indices) return
+        _favorites.value = s.copy(stops = s.stops.toMutableList().apply { add(to, removeAt(from)) })
+        saveFavoriteOrder()
+    }
+
+    /** Ordine mostrato → salvato (in coda gli elementi non mostrati, es. spariti da un nuovo GTFS). */
+    private fun saveFavoriteOrder() {
+        val s = _favorites.value
+        val shown = s.lines.map { Favorite.LineFav(it.route.id, it.pattern.directionId) } + s.stops.map { Favorite.StopFav(it.id) }
+        favoritesStore.setOrder(shown + favoritesStore.items.value.filter { it !in shown })
     }
 
     fun toggleFavoriteStop(stop: Stop) {

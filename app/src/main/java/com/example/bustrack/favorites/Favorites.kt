@@ -38,7 +38,8 @@ sealed interface Favorite {
 }
 
 /**
- * Preferiti salvati sul dispositivo, nell'ordine in cui sono stati aggiunti.
+ * Preferiti salvati sul dispositivo, nell'ordine scelto (all'inizio quello di aggiunta; si cambia
+ * trascinandoli nella Home).
  * Il route_id va per ultimo nella chiave perché è l'unico campo che potrebbe contenere il separatore.
  */
 class FavoritesStore(context: Context) {
@@ -55,6 +56,13 @@ class FavoritesStore(context: Context) {
         save(updated)
         _items.value = updated
         return f in updated
+    }
+
+    /** Nuovo ordine (stessi elementi, riordinati). */
+    fun setOrder(items: List<Favorite>) {
+        val updated = items.distinct()
+        save(updated)
+        _items.value = updated
     }
 
     private fun load(): List<Favorite> =

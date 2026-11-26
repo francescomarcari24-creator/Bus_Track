@@ -112,6 +112,8 @@ fun LineScreen(line: LineState, vm: TransitViewModel) {
             Spacer(Modifier.width(RoundButtonGap))
             RefreshButton(TransitViewModel.REFRESH_LINE in refreshing, onClick = vm::refreshLine)
         }
+        // Aria tra i tasti tondi e il titolo.
+        Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             RouteBadge(line.route.label)
             Text(
@@ -177,7 +179,9 @@ private fun LineStopRow(
         Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
-            .background(if (highlighted) LiveTheme.colors.liveContainer else Color.Transparent)
+            // Riquadro verde smussato come gli altri dell'app (fondo con la forma, senza ritagliare:
+            // il tracciato della linea resta continuo tra una riga e l'altra).
+            .background(if (highlighted) LiveTheme.colors.liveContainer else Color.Transparent, CardCorner)
             .clickable(onClick = onClick)
     ) {
         // Tracciato verticale della linea con il pallino della fermata.
@@ -208,7 +212,7 @@ private fun LineStopRow(
                     VehicleStopStatus.IN_TRANSIT_TO, null -> "in viaggio verso questa fermata"
                 }
                 Text(
-                    "🚌 " + listOfNotNull(where, v.label?.let { "vettura $it" }).joinToString(" · "),
+                    listOfNotNull(where, v.label?.let { "vettura $it" }).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Bold,
                     color = LiveTheme.colors.onLiveContainer,

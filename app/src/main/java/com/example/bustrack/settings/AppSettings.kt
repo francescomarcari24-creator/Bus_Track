@@ -37,6 +37,7 @@ class AppSettings private constructor(context: Context) {
             lessTransfers = prefs.getBoolean(KEY_ROUTE_LESS_TRANSFERS, false),
             noMetro = prefs.getBoolean(KEY_ROUTE_NO_METRO, false),
             noTram = prefs.getBoolean(KEY_ROUTE_NO_TRAM, false),
+            avoidStairs = prefs.getBoolean(KEY_ROUTE_AVOID_STAIRS, false),
         )
     )
     /** Preferenze sul percorso della scheda Nav. */
@@ -49,6 +50,7 @@ class AppSettings private constructor(context: Context) {
             .putBoolean(KEY_ROUTE_LESS_TRANSFERS, value.lessTransfers)
             .putBoolean(KEY_ROUTE_NO_METRO, value.noMetro)
             .putBoolean(KEY_ROUTE_NO_TRAM, value.noTram)
+            .putBoolean(KEY_ROUTE_AVOID_STAIRS, value.avoidStairs)
             .apply()
     }
 
@@ -124,6 +126,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_ROUTE_LESS_WALK = "route_less_walk"
         private const val KEY_ROUTE_LESS_TRANSFERS = "route_less_transfers"
         private const val KEY_ROUTE_NO_METRO = "route_no_metro"
+        private const val KEY_ROUTE_AVOID_STAIRS = "route_avoid_stairs"
         private const val KEY_ROUTE_NO_TRAM = "route_no_tram"
         const val DEFAULT_RADIUS_M = 1000
         val RADIUS_OPTIONS = listOf(500, 1000, 1500, 2000)

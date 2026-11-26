@@ -78,27 +78,44 @@ class WalkGraph(
      * Dijkstra dal nodo [source] fino a [maxMeters]: distanze (metri) e, per ricostruire i
      * percorsi, l'arco con cui si arriva a ogni nodo. I nodi non raggiunti hanno distanza infinita.
      */
-    fun shortestFrom(source: Int, maxMeters: Double): WalkTree {
-        val dist = HashMap<Int, Double>()
+    /**
+     * Percorsi più brevi da [source] fino a [maxMeters] metri a piedi. Con [stairsPenalty] > 1 le
+     * scale "pesano" di più (es. 15 = come una strada lunga 15 volte): si evitano quando c'è
+     * un'alternativa ragionevole, ma restano possibili se non c'è altro modo. Le distanze del
+     * risultato sono sempre i metri veri.
+     */
+    fun shortestFrom(source: Int, maxMeters: Double, stairsPenalty: Double = 1.0): WalkTree {
+        val cost = HashMap<Int, Double>()
+        val meters = HashMap<Int, Double>()
         val via = HashMap<Int, Int>()
         val queue = PriorityQueue<Pair<Double, Int>>(compareBy { it.first })
-        dist[source] = 0.0
+        cost[source] = 0.0
+        meters[source] = 0.0
         queue.add(0.0 to source)
         while (queue.isNotEmpty()) {
-            val (d, n) = queue.poll()!!
-            if (d > (dist[n] ?: Double.MAX_VALUE)) continue
+            val (c, n) = queue.poll()!!
+            if (c > (cost[n] ?: Double.MAX_VALUE)) continue
+            val dn = meters[n]!!
             for (i in adjStart[n] until adjStart[n + 1]) {
                 val e = adjEdge[i]
                 val m = other(e, n)
-                val nd = d + edgeLength[e]
-                if (nd <= maxMeters && nd < (dist[m] ?: Double.MAX_VALUE)) {
-                    dist[m] = nd
+                val len = edgeLength[e].toDouble()
+                val nd = dn + len
+                val nc = c + if (edgeKind[e] == KIND_STEPS) len * stairsPenalty else len
+                if (nd <= maxMeters && nc < (cost[m] ?: Double.MAX_VALUE)) {
+                    cost[m] = nc
+                    meters[m] = nd
                     via[m] = e
-                    queue.add(nd to m)
+                    queue.add(nc to m)
                 }
             }
         }
-        return WalkTree(this, source, dist, via)
+        return WalkTree(this, source, meters, via)
+    }
+
+    companion object {
+        /** Tipo di tratto "scale" (vedi KIND in tools/build_walk_graph.py). */
+        const val KIND_STEPS: Byte = 1
     }
 }
 

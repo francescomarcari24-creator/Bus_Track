@@ -427,11 +427,14 @@ private fun RouteOptionsPanel(
                 OptionRow("Meno cambi", "Preferisce i percorsi con meno mezzi", options.lessTransfers) {
                     onChange(options.copy(lessTransfers = it))
                 }
-                OptionRow("Niente metro", "Esclude le linee della metropolitana", options.noMetro) {
+                OptionRow("Evita la metro", "Esclude le linee della metropolitana", options.noMetro) {
                     onChange(options.copy(noMetro = it))
                 }
-                OptionRow("Niente tram", "Esclude le linee del tram", options.noTram) {
+                OptionRow("Evita il tram", "Esclude le linee del tram", options.noTram) {
                     onChange(options.copy(noTram = it))
+                }
+                OptionRow("Evita le scale", "Tratti a piedi senza scalinate, quando possibile", options.avoidStairs) {
+                    onChange(options.copy(avoidStairs = it))
                 }
             }
         }
